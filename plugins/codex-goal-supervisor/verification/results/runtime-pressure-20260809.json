@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "scenario": "goal_supervisor_runtime_pressure",
+  "plugin_version": "2.1.1+codex.20260809134453",
+  "goal_return": {
+    "status": "PASS",
+    "requested_sessions": 24,
+    "cycles_per_session": 40,
+    "workers": 8,
+    "elapsed_seconds": 45.4593,
+    "operations": 2880,
+    "retained_sessions": 16,
+    "retained_interrupts": 512,
+    "retained_events": 512,
+    "event_bytes": 161784,
+    "latency_ms": {
+      "p50": 130.103,
+      "p95": 174.702,
+      "p99": 189.997,
+      "max": 270.451,
+      "mean": 125.901
+    },
+    "assertions": {
+      "session_bound": true,
+      "interrupt_bound": true,
+      "single_open_branch_per_session": true,
+      "all_retained_branches_closed": true,
+      "event_count_bound": true,
+      "event_byte_bound": true,
+      "state_secret_redacted": true,
+      "event_secret_redacted": true,
+      "compact_recovery_bounded": true,
+      "compact_recovery_tombstones_closed_branch": true,
+      "unrelated_path_does_not_replay": true,
+      "replay_escalation_is_1_2_3": true,
+      "judge_only_after_third_replay": true
+    }
+  },
+  "status_pressure": {
+    "status": "PASS",
+    "workspace_files": 11561,
+    "validation_catalog_bytes": 179743,
+    "latency_ms": {
+      "samples": [
+        386.175,
+        315.919,
+        356.705
+      ],
+      "p95": 386.175,
+      "max": 386.175
+    },
+    "compact_output_chars": 1651,
+    "assertions": {
+      "cold_status_under_2_seconds": true,
+      "compact_status_under_2500_chars": true,
+      "status_did_not_activate_ticket": true,
+      "catalog_fixture_is_large": true
+    }
+  },
+  "activation_and_boundaries": {
+    "status": "PASS",
+    "assertions": {
+      "ordinary_inactive_edit_is_silent": true,
+      "deterministic_destructive_git_is_denied": true,
+      "control_state_write_is_denied": true,
+      "feedback_capture_enabled": true,
+      "feedback_upload_disabled": true,
+      "feedback_delivery_local_only": true
+    }
+  },
+  "status": "PASS",
+  "elapsed_seconds": 50.3327
+}

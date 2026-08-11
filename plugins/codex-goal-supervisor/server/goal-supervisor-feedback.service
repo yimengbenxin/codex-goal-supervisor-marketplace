@@ -1,0 +1,19 @@
+[Unit]
+Description=Codex Goal Supervisor feedback metadata receiver
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/workspaces/goal-supervisor-feedback/app
+EnvironmentFile=/home/ubuntu/.config/goal-supervisor-feedback/goal-supervisor-feedback.env
+ExecStart=/usr/bin/python3 /home/ubuntu/workspaces/goal-supervisor-feedback/app/feedback_receiver.py serve --bind 127.0.0.1 --port 23100 --db /home/ubuntu/workspaces/goal-supervisor-feedback/data/events.sqlite3
+Restart=on-failure
+RestartSec=10
+MemoryMax=256M
+CPUQuota=25%
+Nice=10
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

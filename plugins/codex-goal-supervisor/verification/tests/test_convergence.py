@@ -1,0 +1,519 @@
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+try:
+    from .helpers import GOAL_COMPASS, PLUGIN_ROOT, GoalCompassRepoCase, pushd
+except ImportError:
+    from helpers import GOAL_COMPASS, PLUGIN_ROOT, GoalCompassRepoCase, pushd
+
+from goal_compass_runtime.convergence import (
+    apply_observation,
+    empty_state,
+    judge_trigger,
+    record_iteration,
+)
+from goal_compass_runtime.llm_judge import invoke
+
+
+class ConvergenceStateTests(GoalCompassRepoCase):
+    def certifiable_goal(self) -> None:
+        self.goal_video()
+        north = self.read_json(".agent/north_star_goal.json")
+        north["goal_definition"] = {
+            "quality": "STRUCTURED_DETAILED",
+            "success_criteria": ["The end-to-end mock video pipeline passes its registered regression."],
+            "final_acceptance": [{
+                "criterion": "The end-to-end mock video pipeline passes its registered regression.",
+                "evidence": "mock_video_pipeline_test",
+                "validation_method": "validation_catalog",
+            }],
+            "process": {"nodes": []},
+        }
+        self.write_json(".agent/north_star_goal.json", north)
+
+    def test_init_writes_convergence_state_and_judge_schema(self) -> None:
+        self.assertTrue((self.root / ".agent/runtime/convergence_state.json").is_file())
+        schema = self.read_json(".agent/protocols/llm_judge.schema.json")
+        self.assertIn("CONFIRM_TARGETED_RAIL", schema["properties"]["verdict"]["enum"])
+
+    def test_init_projects_an_existing_confirmed_north_star(self) -> None:
+        north = self.read_json(".agent/north_star_goal.json")
+        north.update({"confirmed": True, "goal": "Deliver the verified registry."})
+        self.write_json(".agent/north_star_goal.json", north)
+        self.write_json(".agent/runtime/convergence_state.json", empty_state())
+
+        self.cli("init")
+
+        state = self.read_json(".agent/runtime/convergence_state.json")
+        self.assertEqual(state["goal_stack"]["l0_final_goal"], "Deliver the verified registry.")
+
+    def test_status_exposes_four_level_goal_stack(self) -> None:
+        north = self.read_json(".agent/north_star_goal.json")
+        north.update({
+            "confirmed": True,
+            "goal": "Deliver a reliable package registry.",
+            "goal_definition": {
+                "quality": "STRUCTURED_DETAILED",
+                "success_criteria": ["Uploads are validated", "Downloads preserve the accepted package"],
+                "final_acceptance": [],
+            },
+        })
+        self.write_json(".agent/north_star_goal.json", north)
+        self.cli("phase-set", "--id", "P1", "--goal", "Prove the upload and validation path", "--exit-criterion", "valid package is accepted")
+        self.cli("convergence", "--current-action", "Run the accepted package fixture", "--expected-evidence", "validation result")
+
+        result = self.json_run("status")
+        detail = self.json_run("convergence")
+        stack = detail["convergence"]["goal_stack"]
+        self.assertEqual(stack["l0_final_goal"], "Deliver a reliable package registry.")
+        self.assertEqual(stack["l2_current_stage"], "Prove the upload and validation path")
+        self.assertEqual(stack["l3_current_action"], "Run the accepted package fixture")
+        self.assertEqual(stack["l3_expected_evidence"], "validation result")
+        self.assertEqual(len(stack["l1_success_criteria"]), 2)
+
+    def test_convergence_projects_specific_goal_modules_and_acceptance(self) -> None:
+        north = self.read_json(".agent/north_star_goal.json")
+        north.update({
+            "confirmed": True,
+            "goal": "Deliver a traceable packaging release workflow.",
+            "goal_definition": {
+                "precise_goal": "Link each packaging lot to evidence and a release decision.",
+                "current_state": "Evidence is fragmented.",
+                "desired_state": "Each release is reproducible.",
+                "process": {"nodes": [
+                    {
+                        "node_id": "N1",
+                        "name": "Evidence intake",
+                        "objective": "Validate lot evidence.",
+                        "inputs": ["lot data"],
+                        "outputs": ["validated evidence record"],
+                        "exit_criteria": ["required measurements are resolved"],
+                        "dependencies": [],
+                        "execution_mode": "SERIAL",
+                        "contribution_to_goal": "Creates the evidence foundation.",
+                    },
+                    {
+                        "node_id": "N2",
+                        "name": "Release decision",
+                        "objective": "Evaluate release rules.",
+                        "inputs": ["validated evidence record"],
+                        "outputs": ["release result"],
+                        "exit_criteria": ["every rule has evidence"],
+                        "dependencies": ["N1"],
+                        "execution_mode": "SERIAL",
+                        "contribution_to_goal": "Produces the accepted user result.",
+                    },
+                ]},
+                "final_acceptance": [{
+                    "criterion": "A fixture lot completes the workflow.",
+                    "evidence": "fixture result",
+                    "validation_method": "run focused validation",
+                }],
+                "constraints": ["Do not replace plant MES"],
+                "non_goals": ["Enterprise compliance platform"],
+            },
+        })
+        self.write_json(".agent/north_star_goal.json", north)
+        self.cli("init")
+
+        state = self.read_json(".agent/runtime/convergence_state.json")
+        contract = state["goal_stack"]["goal_contract"]
+        self.assertEqual(contract["objective"], "Link each packaging lot to evidence and a release decision.")
+        self.assertEqual(contract["modules"][1]["dependencies"], ["N1"])
+        self.assertEqual(contract["modules"][1]["outputs"], ["release result"])
+        self.assertEqual(contract["final_acceptance"][0]["evidence"], "fixture result")
+        compact = self.json_run("status")["convergence"]["goal_stack"]["goal_contract"]
+        self.assertEqual(compact["module_count"], 2)
+        self.assertEqual(compact["final_acceptance_count"], 1)
+
+    def test_completed_phase_clears_current_stage_and_action(self) -> None:
+        self.cli("phase-set", "--id", "P1", "--goal", "Verify the bounded change", "--exit-criterion", "tests pass")
+        self.cli("convergence", "--current-action", "Run the focused tests", "--expected-evidence", "test output")
+
+        self.cli("phase-complete", "--reason", "Focused tests passed")
+
+        stack = self.json_run("status")["convergence"]["goal_stack"]
+        self.assertIsNone(stack["l2_current_stage"])
+        self.assertIsNone(stack["l3_current_action"])
+        self.assertIsNone(stack["l3_expected_evidence"])
+
+    def test_north_star_completion_requires_final_regression(self) -> None:
+        self.certifiable_goal()
+
+        result = self.json_run("convergence", "--certify-goal", check=False)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["goal_completion"]["status"], "NEEDS_FINAL_REGRESSION")
+        self.assertNotEqual(result["convergence"]["goal_completion"]["status"], "CERTIFIED_COMPLETE")
+
+    def test_failed_final_regression_cannot_certify_north_star(self) -> None:
+        self.certifiable_goal()
+        catalog = self.read_json(".agent/validation_catalog.json")
+        catalog["project_regression_fail"] = {
+            "cmd": "{python} -c \"import sys; sys.exit(1)\"",
+            "description": "Deterministic failing final regression fixture.",
+            "timeout_sec": 8,
+        }
+        self.write_json(".agent/validation_catalog.json", catalog)
+
+        result = self.json_run(
+            "convergence", "--certify-goal",
+            "--final-validation-id", "project_regression_fail",
+            check=False,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["goal_completion"]["status"], "FINAL_REGRESSION_FAILED")
+        self.assertEqual(result["goal_completion"]["validation"]["status"], "FAIL")
+        self.assertEqual(self.json_run("status")["convergence"]["goal_completion"], "FINAL_REGRESSION_FAILED")
+
+    def test_local_validation_cannot_certify_goal_with_empty_global_success_contract(self) -> None:
+        self.certifiable_goal()
+        north = self.read_json(".agent/north_star_goal.json")
+        north["goal_definition"]["success_criteria"] = []
+        north["goal_definition"]["final_acceptance"] = []
+        self.write_json(".agent/north_star_goal.json", north)
+
+        result = self.json_run(
+            "convergence", "--certify-goal",
+            "--final-validation-id", "mock_video_pipeline_test",
+            check=False,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["goal_completion"]["status"], "INCOMPLETE_GOAL_CONTRACT")
+        self.assertEqual(result["goal_completion"]["required_action"], "repair_goal_contract")
+        self.assertIn("local validation cannot certify", result["goal_completion"]["failure_reasons"][0])
+        self.assertNotEqual(self.json_run("status")["status"], "GOAL_CERTIFIED_COMPLETE")
+
+    def test_passing_final_regression_certifies_goal_and_completes_phase(self) -> None:
+        self.certifiable_goal()
+        self.cli("phase-set", "--id", "FINAL", "--goal", "Run final regression", "--exit-criterion", "project regression passes")
+
+        result = self.json_run(
+            "convergence", "--certify-goal",
+            "--final-validation-id", "mock_video_pipeline_test",
+            "--completion-summary", "End-to-end project regression passed.",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["goal_completion"]["status"], "CERTIFIED_COMPLETE")
+        self.assertEqual(result["goal_completion"]["validation"]["status"], "PASS")
+        self.assertEqual(result["goal_completion"]["program_phase"]["status"], "COMPLETED")
+        status = self.json_run("status")
+        self.assertEqual(status["status"], "GOAL_CERTIFIED_COMPLETE")
+        self.assertEqual(status["required_action"], "deliver_verified_result")
+        self.assertEqual(status["convergence"]["goal_completion"], "CERTIFIED_COMPLETE")
+
+    def test_goal_replacement_invalidates_final_regression_certificate(self) -> None:
+        self.certifiable_goal()
+        self.json_run(
+            "convergence", "--certify-goal",
+            "--final-validation-id", "mock_video_pipeline_test",
+        )
+
+        self.cli(
+            "goal-set", "--text", "Build a traceable packaging release workflow.",
+            "--replace-existing",
+        )
+
+        status = self.json_run("status")
+        self.assertEqual(status["convergence"]["goal_completion"], "STALE_GOAL_CHANGED")
+        self.assertNotEqual(status["status"], "GOAL_CERTIFIED_COMPLETE")
+
+    def test_activity_does_not_claim_progress(self) -> None:
+        state = empty_state()
+        for index in range(20):
+            state = apply_observation(state, {
+                "event_id": f"write-{index}",
+                "phase": "PostToolUse",
+                "category": "write",
+                "failed": False,
+                "ts": "2026-08-03T00:00:00+00:00",
+            })
+        self.assertEqual(state["activity"]["writes"], 20)
+        self.assertEqual(state["progress"]["evidence_count"], 0)
+        self.assertIsNone(state["progress"]["last_progress_at"])
+
+    def test_two_completed_iterations_without_evidence_trigger_judge_eligibility(self) -> None:
+        state = empty_state()
+        for index in range(2):
+            state = record_iteration(
+                state,
+                hypothesis=f"attempt {index}",
+                change="modify implementation",
+                expected_result="test improves",
+                validation="run test",
+                result="no new evidence",
+                decision="retry",
+                evidence_ids=[],
+                completed_criteria=[],
+                observed_at=f"2026-08-03T00:0{index}:00+00:00",
+            )
+        trigger = judge_trigger(state)
+        self.assertTrue(trigger["eligible"])
+        self.assertIn("two_completed_iterations_without_evidence_progress", trigger["reasons"])
+
+    def test_event_signals_alone_do_not_trigger_judge(self) -> None:
+        state = empty_state()
+        state["activity"]["failed_events"] = 2
+        state["activity"]["writes"] = 100
+        trigger = judge_trigger(state)
+        self.assertFalse(trigger["eligible"])
+        self.assertEqual(trigger["reasons"], [])
+
+    def test_iteration_record_requires_evidence_to_reset_stagnation(self) -> None:
+        for index in range(2):
+            result = self.json_run(
+                "convergence", "--record-iteration",
+                "--hypothesis", f"hypothesis {index}",
+                "--change", "change implementation",
+                "--expected-result", "validation improves",
+                "--validation", "run focused test",
+                "--result", "no evidence",
+                "--decision", "retry",
+            )
+        self.assertEqual(result["convergence"]["progress"]["no_progress_iterations"], 2)
+
+        result = self.json_run(
+            "convergence", "--record-iteration",
+            "--hypothesis", "focused correction",
+            "--change", "fix the failing branch",
+            "--expected-result", "focused test passes",
+            "--validation", "run focused test",
+            "--result", "test passed",
+            "--decision", "accept",
+            "--evidence-id", "focused-test-pass",
+            "--completed-criterion", "focused branch behaves correctly",
+        )
+        self.assertEqual(result["convergence"]["progress"]["no_progress_iterations"], 0)
+        self.assertEqual(result["convergence"]["progress"]["evidence_count"], 1)
+        persisted = self.read_json(".agent/runtime/convergence_state.json")
+        self.assertEqual(persisted["evidence"][0]["evidence_id"], "focused-test-pass")
+        self.assertEqual(result["convergence"]["progress"]["completed_criteria_count"], 1)
+
+
+class LlmJudgeTests(GoalCompassRepoCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._old_judge_cmd = os.environ.get("GOAL_SUPERVISOR_JUDGE_CMD")
+        self.fake = self.root / "fake_codex.py"
+        self.log = self.root / "fake_judge_log.jsonl"
+        os.environ["GOAL_SUPERVISOR_JUDGE_CMD"] = f"{sys.executable} {self.fake}"
+        os.environ["FAKE_JUDGE_LOG"] = str(self.log)
+
+    def tearDown(self) -> None:
+        if self._old_judge_cmd is None:
+            os.environ.pop("GOAL_SUPERVISOR_JUDGE_CMD", None)
+        else:
+            os.environ["GOAL_SUPERVISOR_JUDGE_CMD"] = self._old_judge_cmd
+        os.environ.pop("FAKE_JUDGE_LOG", None)
+        super().tearDown()
+
+    def write_fake(self, verdict: str = "ALLOW_SCOPED_ACTION", confidence: str = "high", *, sleep: float = 0.0, malformed: bool = False) -> None:
+        payload = "not-json" if malformed else json.dumps({
+            "verdict": verdict,
+            "confidence": confidence,
+            "rationale": "The scoped action remains aligned with the current evidence.",
+            "recommended_action": "continue_scoped_action",
+            "evidence_needed": [],
+        })
+        self.fake.write_text(
+            "import json, os, pathlib, sys, time\n"
+            f"time.sleep({sleep!r})\n"
+            "args=sys.argv[1:]\n"
+            "prompt=sys.stdin.read()\n"
+            "out=pathlib.Path(args[args.index('-o')+1])\n"
+            f"out.write_text({payload!r}, encoding='utf-8')\n"
+            "log=pathlib.Path(os.environ['FAKE_JUDGE_LOG'])\n"
+            "with log.open('a', encoding='utf-8') as h: h.write(json.dumps({'cwd':os.getcwd(),'marker':os.environ.get('GOAL_SUPERVISOR_LLM_JUDGE'),'args':args,'prompt':prompt})+'\\n')\n",
+            encoding="utf-8",
+        )
+
+    def packet(self) -> dict:
+        return {
+            "trigger": "pending_targeted_rail",
+            "north_star_goal": "Build a private package registry.",
+            "success_criteria": ["private upload works"],
+            "current_stage": "upload validation",
+            "current_action": "write under src/registry",
+            "expected_evidence": "focused validation",
+            "observed_evidence": [],
+            "policy_boundary": "public marketplace",
+            "alignment_layer": "GOAL_CONTRACT",
+            "goal_contract": {
+                "objective": "Validate and store private Agent packages.",
+                "modules": [{
+                    "node_id": "N2",
+                    "name": "Package validation",
+                    "objective": "Validate package structure before storage.",
+                    "dependencies": ["N1"],
+                    "outputs": ["validated package"],
+                    "exit_criteria": ["manifest and README pass"],
+                    "contribution_to_goal": "Prevents invalid shared packages.",
+                }],
+                "final_acceptance": [{"criterion": "valid package can be downloaded"}],
+                "constraints": ["private LAN only"],
+                "non_goals": ["public marketplace"],
+            },
+            "affected_paths": ["src/registry"],
+            "consequence": "possible expensive rework",
+            "source_code": "must never be sent",
+            "credentials": "must never be sent",
+        }
+
+    def test_judge_is_neutral_read_only_structured_and_cached(self) -> None:
+        self.write_fake()
+        schema = self.root / ".agent/protocols/llm_judge.schema.json"
+        cache = self.root / ".agent/runtime/test_judge_cache.json"
+        first = invoke(self.packet(), schema_path=schema, cache_path=cache, timeout_seconds=2)
+        second = invoke(self.packet(), schema_path=schema, cache_path=cache, timeout_seconds=2)
+
+        self.assertEqual(first["status"], "COMPLETED")
+        self.assertEqual(second["status"], "CACHED")
+        rows = self.log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(rows), 1)
+        log = json.loads(rows[0])
+        self.assertNotEqual(Path(log["cwd"]), self.root)
+        self.assertEqual(log["marker"], "1")
+        self.assertIn("--ephemeral", log["args"])
+        self.assertIn("read-only", log["args"])
+        self.assertNotIn("must never be sent", log["prompt"])
+        self.assertIn("Package validation", log["prompt"])
+        self.assertIn("Goal contract", log["prompt"])
+
+    def test_judge_timeout_fails_open(self) -> None:
+        self.write_fake(sleep=1.0)
+        result = invoke(
+            self.packet(),
+            schema_path=self.root / ".agent/protocols/llm_judge.schema.json",
+            cache_path=self.root / ".agent/runtime/timeout_cache.json",
+            timeout_seconds=0.05,
+            force=True,
+        )
+        self.assertEqual(result["status"], "TIMEOUT")
+        self.assertEqual(result["verdict"], "INSUFFICIENT_EVIDENCE")
+
+    def test_judge_process_start_failure_fails_open(self) -> None:
+        os.environ["GOAL_SUPERVISOR_JUDGE_CMD"] = str(self.root / "missing-codex")
+        result = invoke(
+            self.packet(),
+            schema_path=self.root / ".agent/protocols/llm_judge.schema.json",
+            cache_path=self.root / ".agent/runtime/start_failure_cache.json",
+            timeout_seconds=2,
+            force=True,
+        )
+        self.assertEqual(result["status"], "UNAVAILABLE")
+        self.assertEqual(result["verdict"], "INSUFFICIENT_EVIDENCE")
+        self.assertEqual(result["recommended_action"], "continue_with_scripted_advisory_only")
+
+    def test_malformed_judge_output_fails_open(self) -> None:
+        self.write_fake(malformed=True)
+        result = invoke(
+            self.packet(),
+            schema_path=self.root / ".agent/protocols/llm_judge.schema.json",
+            cache_path=self.root / ".agent/runtime/malformed_cache.json",
+            timeout_seconds=2,
+            force=True,
+        )
+        self.assertEqual(result["status"], "MALFORMED")
+        self.assertEqual(result["verdict"], "INSUFFICIENT_EVIDENCE")
+
+    def test_second_completed_no_progress_iteration_invokes_judge_once(self) -> None:
+        self.write_fake(verdict="WARN_AND_RECHECK", confidence="medium")
+        os.environ.pop("GOAL_SUPERVISOR_DISABLE_LLM_JUDGE", None)
+        common = [
+            "--record-iteration",
+            "--change", "adjust the same implementation path",
+            "--expected-result", "produce new machine evidence",
+            "--validation", "run the focused validation",
+            "--result", "no new evidence",
+            "--decision", "reassess",
+        ]
+        first = self.json_run("convergence", *common, "--hypothesis", "first attempt")
+        second = self.json_run("convergence", *common, "--hypothesis", "second attempt")
+
+        self.assertIsNone(first["judge_result"])
+        self.assertEqual(second["judge_result"]["verdict"], "WARN_AND_RECHECK")
+        self.assertEqual(len(self.log.read_text(encoding="utf-8").splitlines()), 1)
+
+    def hook_output(self, event: dict) -> str:
+        output = io.StringIO()
+        with pushd(self.root), contextlib.redirect_stdout(output):
+            GOAL_COMPASS.hook_pre(event)
+        return output.getvalue()
+
+    def test_third_semantic_deviation_requires_judge_confirmation(self) -> None:
+        self.write_fake(verdict="ALLOW_SCOPED_ACTION", confidence="high")
+        os.environ.pop("GOAL_SUPERVISOR_DISABLE_LLM_JUDGE", None)
+        north = self.read_json(".agent/north_star_goal.json")
+        north.update({
+            "confirmed": True,
+            "goal": "Build a private internal Agent Registry.",
+            "anti_goals": ["provider marketplace"],
+        })
+        self.write_json(".agent/north_star_goal.json", north)
+        outputs = []
+        for index in range(3):
+            outputs.append(self.hook_output({
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": (
+                        "*** Begin Patch\n"
+                        f"*** Add File: src/providers/marketplace/{index}.py\n"
+                        "+provider marketplace\n"
+                        "*** End Patch"
+                    ),
+                },
+                "tool_use_id": f"judge-release-{index}",
+            }))
+        self.assertIn("LLM Judge did not confirm", outputs[-1])
+        self.assertNotIn("permissionDecision", outputs[-1])
+        self.assertEqual(len(self.log.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_high_confidence_judge_can_confirm_targeted_rail(self) -> None:
+        self.write_fake(verdict="CONFIRM_TARGETED_RAIL", confidence="high")
+        os.environ.pop("GOAL_SUPERVISOR_DISABLE_LLM_JUDGE", None)
+        north = self.read_json(".agent/north_star_goal.json")
+        north.update({
+            "confirmed": True,
+            "goal": "Build a private internal Agent Registry.",
+            "anti_goals": ["provider marketplace"],
+        })
+        self.write_json(".agent/north_star_goal.json", north)
+        output = ""
+        for index in range(3):
+            output = self.hook_output({
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": (
+                        "*** Begin Patch\n"
+                        f"*** Add File: src/providers/marketplace/{index}.py\n"
+                        "+provider marketplace\n"
+                        "*** End Patch"
+                    ),
+                },
+                "tool_use_id": f"judge-confirm-{index}",
+            })
+        self.assertIn("permissionDecision", output)
+        self.assertIn("Sparse LLM Judge confirmed", output)
+
+
+class ExplicitActivationContractTests(GoalCompassRepoCase):
+    def test_skill_requires_north_star_and_client_goal_mode_after_explicit_activation(self) -> None:
+        text = (PLUGIN_ROOT / "skills/goal-supervisor/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("establishing the project North Star and starting the Codex client Goal mode are mandatory", text)
+        self.assertIn("Never claim activation is complete when only one of these two states exists", text)
+
+
+if __name__ == "__main__":
+    import unittest
+
+    unittest.main()

@@ -1,0 +1,316 @@
+{
+  "ticket_id": "ROUTING-MVP-001",
+  "title": "Prompt routing to mock adapter",
+  "global_goal": "Build an AI automatic video generation system",
+  "why_now": "Routing is needed before real providers; a mock adapter proves the path without provider complexity.",
+  "task_goal": "Route a prompt request to the mock video adapter and return its mock artifact response.",
+  "status": "PENDING",
+  "acceptance_ready": true,
+  "must_do": [
+    "Create the smallest prompt routing function",
+    "Connect routing to the mock adapter only",
+    "Return a deterministic mock response",
+    "Add a focused routing test"
+  ],
+  "must_not_do": [
+    "Do not add provider selection UI",
+    "Do not build provider marketplace",
+    "Do not connect real providers",
+    "Do not redesign all routing architecture",
+    "Do not build RBAC"
+  ],
+  "anti_patterns": [
+    "provider marketplace",
+    "real provider integration",
+    "full classifier platform",
+    "RBAC",
+    "security gateway"
+  ],
+  "allowed_paths": [
+    "src/routing/**",
+    "src/video/mock/**",
+    "tests/routing/routing-mvp.test.ts",
+    "docs/mvp-flow.md"
+  ],
+  "forbidden_paths": [
+    "src/security/**",
+    "src/ui/**",
+    "src/providers/**",
+    ".env",
+    ".agent/**"
+  ],
+  "acceptance": {
+    "commands_pass": [
+      "routing_mvp_test"
+    ],
+    "files_exist": [
+      "tests/routing/routing-mvp.test.ts"
+    ],
+    "contains": [],
+    "assertions": [],
+    "files_not_changed": [
+      "src/security/**",
+      "src/ui/**",
+      "src/providers/**"
+    ],
+    "max_changed_files": 5,
+    "max_diff_lines": 300
+  },
+  "validation_ids": [
+    "routing_mvp_test"
+  ],
+  "budget": {
+    "max_minutes": 30,
+    "max_tool_calls": 40,
+    "max_changed_files": 5,
+    "max_diff_lines": 300
+  },
+  "drift_signals": [
+    "Starts building full classifier platform",
+    "Starts designing multi-provider marketplace",
+    "Starts building unrelated UI/config system",
+    "Starts adding security gateway beyond minimal route guard"
+  ],
+  "backlog_only": [
+    "Real provider ranking",
+    "Provider marketplace",
+    "Provider settings UI",
+    "Advanced router policy"
+  ],
+  "mdcp": {
+    "protocol": "MDCP",
+    "protocol_version": "1.0",
+    "role": "cross_layer_rule_library",
+    "source": "https://github.com/HanShengrunning/-multi-dimensional-collaboration-protocol",
+    "layer_1_structured_expression": {
+      "north_star_goal": "Build an AI automatic video generation system",
+      "goal_anchor": "Route a prompt request to the mock video adapter and return its mock artifact response.",
+      "scope_anchor": [
+        "Route a prompt request to the mock video adapter and return its mock artifact response.",
+        "src/routing/**",
+        "src/video/mock/**",
+        "tests/routing/routing-mvp.test.ts",
+        "docs/mvp-flow.md",
+        "current acceptance only"
+      ],
+      "conversation_plane": "architecture",
+      "precision_level": "high",
+      "time_cost_signal": "medium",
+      "value_signal": "medium",
+      "metacognition_lock_signal": "none",
+      "loop_risk": "none",
+      "consumer_mismatch_risk": "none",
+      "acceptance_consumer": "validation_catalog",
+      "scope_sink_risk": "none"
+    },
+    "layer_1_fields": {
+      "north_star_goal": "Build an AI automatic video generation system",
+      "goal_anchor": "Route a prompt request to the mock video adapter and return its mock artifact response.",
+      "scope_anchor": [
+        "Route a prompt request to the mock video adapter and return its mock artifact response.",
+        "src/routing/**",
+        "src/video/mock/**",
+        "tests/routing/routing-mvp.test.ts",
+        "docs/mvp-flow.md",
+        "current acceptance only"
+      ],
+      "conversation_plane": "architecture",
+      "precision_level": "high",
+      "time_cost_signal": "medium",
+      "value_signal": "medium",
+      "metacognition_lock_signal": "none",
+      "loop_risk": "none",
+      "consumer_mismatch_risk": "none",
+      "acceptance_consumer": "validation_catalog",
+      "scope_sink_risk": "none"
+    },
+    "layer_1_pass_criteria": {
+      "north_star_confirmed": false,
+      "request_classified": true,
+      "ticket_structured": true,
+      "machine_acceptance_present": true,
+      "acceptance_consumer_known": true,
+      "allowed_paths_present": true,
+      "forbidden_paths_present": true,
+      "budget_present": true,
+      "drift_signals_present": true,
+      "raw_shell_acceptance_forbidden": true,
+      "scope_anchor_present": true
+    },
+    "layer_2_company_roles": {
+      "product": {
+        "why_now": "This advances the prompt -> mock video artifact end-to-end path.",
+        "north_star_fit": "serve current North Star through the current ticket acceptance",
+        "non_goal_warning": [],
+        "user_value_signal": "medium"
+      },
+      "engineering": {
+        "smallest_path": "Use one minimal job path and mock generator; return the mock artifact path.",
+        "avoid_overengineering": [
+          "future framework",
+          "unrelated rewrite",
+          "broad platform work"
+        ],
+        "expected_files": [
+          "src/routing/**",
+          "src/video/mock/**",
+          "tests/routing/routing-mvp.test.ts",
+          "docs/mvp-flow.md"
+        ],
+        "unnecessary_files": [
+          "src/security/**",
+          "src/ui/**",
+          "src/providers/**",
+          ".env",
+          ".agent/**"
+        ]
+      },
+      "architecture": {
+        "premature_abstraction_risks": [
+          "provider marketplace",
+          "generic plugin architecture",
+          "future provider framework",
+          "RBAC"
+        ],
+        "simpler_structure": "Use one minimal job path and mock generator; return the mock artifact path.",
+        "do_not_generalize_yet": [
+          "real providers",
+          "provider marketplace",
+          "UI config panel",
+          "RBAC"
+        ]
+      },
+      "qa": {
+        "acceptance_consumer": "validation_catalog",
+        "machine_acceptance_candidates": [
+          "Use one focused validation command or assertion from the rough task.",
+          "Assert the expected file or artifact path exists.",
+          "Assert returned mock artifact path with a focused mock video pipeline test."
+        ],
+        "missing_acceptance_risks": [
+          "no validation id",
+          "no files_exist/contains/assertions"
+        ],
+        "unsupported_acceptance_shapes": [
+          "raw shell command in commands_pass",
+          "contains without file/text"
+        ]
+      },
+      "scope_cost": {
+        "scope_anchor": [
+          "Route a prompt request to the mock video adapter and return its mock artifact response.",
+          "src/routing/**",
+          "src/video/mock/**",
+          "tests/routing/routing-mvp.test.ts",
+          "docs/mvp-flow.md",
+          "current acceptance only"
+        ],
+        "scope_sink_risks": [
+          "real providers",
+          "provider marketplace",
+          "UI config panel",
+          "RBAC"
+        ],
+        "backlog_only": [
+          "Real provider ranking",
+          "Provider marketplace",
+          "Provider settings UI",
+          "Advanced router policy"
+        ],
+        "budget_recommendation": {
+          "max_minutes": 30,
+          "max_tool_calls": 40,
+          "max_changed_files": 5,
+          "max_diff_lines": 300
+        }
+      },
+      "custodian": {
+        "request_verdict": "UNKNOWN",
+        "accepted_intent": "",
+        "minimal_action": "",
+        "rejected_scope": [],
+        "backlog_items": []
+      },
+      "janitor": {
+        "likely_shit_mountain": [
+          "provider marketplace",
+          "generic plugin architecture",
+          "future provider framework",
+          "RBAC"
+        ],
+        "delete_or_backlog_candidates": [],
+        "simplify_candidates": [
+          "single-use abstraction",
+          "registry before second implementation"
+        ]
+      },
+      "auditor": {
+        "acceptance_risks": [],
+        "validation_risks": [
+          "validation requirement not run yet"
+        ],
+        "consumer_mismatch_risks": [
+          "none"
+        ],
+        "axis_fatigue_risks": [
+          "none"
+        ]
+      }
+    },
+    "layer_2_role_constraints": {
+      "no_gate_language": true,
+      "structured_objections_only": true,
+      "must_mark_scope_anchor": true,
+      "must_mark_consumer": true,
+      "must_mark_smaller_path": true,
+      "allowed_outputs": [
+        "must_do_candidate",
+        "must_not_do_candidate",
+        "acceptance_candidate",
+        "drift_signal_candidate",
+        "backlog_candidate",
+        "smaller_path",
+        "shit_mountain_risk",
+        "request_risk"
+      ],
+      "forbidden_output_policy": "no gate language"
+    },
+    "layer_2_pass_criteria": {
+      "required_roles_present": true,
+      "role_outputs_structured": true,
+      "no_approval_language": true,
+      "product_why_now_present": true,
+      "engineering_smallest_path_present": true,
+      "qa_acceptance_candidates_present": true,
+      "scope_sink_risks_present": true,
+      "custodian_verdict_present": true,
+      "janitor_noise_candidates_present": true,
+      "conflicts_resolved_into_ticket_or_backlog": true
+    },
+    "layer_3_audit_checks": {
+      "same_axis_loop_check": true,
+      "acceptance_consumer_check": true,
+      "scope_anchor_violation_check": true,
+      "precision_mismatch_check": true
+    },
+    "pass_criteria": {
+      "layer_1_structured_expression_pass": [
+        "precision_level is explicit",
+        "scope_anchor is non-empty",
+        "conversation_plane is explicit",
+        "acceptance_consumer is explicit"
+      ],
+      "layer_2_lens_generation_pass": [
+        "lens output stays in allowed output keys",
+        "objections identify smaller_path or backlog_candidate",
+        "no gate language is used"
+      ],
+      "layer_3_janitor_auditor_pass": [
+        "same-axis fatigue is surfaced",
+        "outside allowed_paths is drift",
+        "heavy future scope cannot become protected only by weak words",
+        "machine acceptance is required before PASS"
+      ]
+    }
+  }
+}
