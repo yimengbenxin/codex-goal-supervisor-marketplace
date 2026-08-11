@@ -185,6 +185,31 @@ class PluginAutoUpdateTests(unittest.TestCase):
             UPDATER.run_process(command, timeout=1)
         self.assertLess(time.monotonic() - started, 4)
 
+    def test_process_environment_uses_system_proxy_when_environment_is_unset(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                UPDATER.urllib.request,
+                "getproxies",
+                return_value={"http": "http://127.0.0.1:7897", "https": "http://127.0.0.1:7897"},
+            ),
+        ):
+            environment = UPDATER.process_environment()
+        self.assertEqual(environment["HTTP_PROXY"], "http://127.0.0.1:7897")
+        self.assertEqual(environment["HTTPS_PROXY"], "http://127.0.0.1:7897")
+
+    def test_process_environment_keeps_explicit_proxy(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {"HTTPS_PROXY": "https://explicit.example:8443"}, clear=True),
+            mock.patch.object(
+                UPDATER.urllib.request,
+                "getproxies",
+                return_value={"https": "http://system.example:8080"},
+            ),
+        ):
+            environment = UPDATER.process_environment()
+        self.assertEqual(environment["HTTPS_PROXY"], "https://explicit.example:8443")
+
     def test_marketplace_requires_https(self) -> None:
         CONFIGURE.require_safe_url("https://updates.example/goal-supervisor.git")
         with self.assertRaises(UPDATER.UpdateError):
