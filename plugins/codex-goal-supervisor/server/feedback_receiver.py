@@ -13,6 +13,8 @@ import re
 import secrets
 import sqlite3
 import sys
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -174,6 +176,15 @@ class FeedbackStore:
                     body_bytes INTEGER NOT NULL,
                     content_type TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS feedback_github_mirrors (
+                    event_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    issue_url TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(event_id) REFERENCES feedback_events(event_id)
+                );
                 """
             )
 
@@ -296,6 +307,148 @@ class FeedbackStore:
             }
             for row in rows
         ]
+
+    def github_pending(self, *, limit: int = 10, max_attempts: int = 5) -> list[dict[str, str]]:
+        bounded_limit = max(1, min(limit, 50))
+        bounded_attempts = max(1, min(max_attempts, 20))
+        with self.session() as connection:
+            rows = connection.execute(
+                """
+                SELECT events.event_id, events.received_at, events.payload_json
+                FROM feedback_events AS events
+                LEFT JOIN feedback_github_mirrors AS mirrors
+                    ON mirrors.event_id = events.event_id
+                WHERE COALESCE(mirrors.status, 'PENDING') != 'MIRRORED'
+                  AND COALESCE(mirrors.attempts, 0) < ?
+                ORDER BY events.received_at ASC, events.event_id ASC
+                LIMIT ?
+                """,
+                (bounded_attempts, bounded_limit),
+            ).fetchall()
+        return [
+            {
+                "event_id": str(row[0]),
+                "server_received_at": str(row[1]),
+                "payload_json": str(row[2]),
+            }
+            for row in rows
+        ]
+
+    def mark_github_mirrored(self, event_ids: list[str], issue_url: str) -> None:
+        with self.session() as connection:
+            for event_id in event_ids:
+                connection.execute(
+                    """
+                    INSERT INTO feedback_github_mirrors (
+                        event_id, status, attempts, issue_url, last_error, updated_at
+                    ) VALUES (?, 'MIRRORED', 1, ?, NULL, ?)
+                    ON CONFLICT(event_id) DO UPDATE SET
+                        status = 'MIRRORED',
+                        attempts = feedback_github_mirrors.attempts + 1,
+                        issue_url = excluded.issue_url,
+                        last_error = NULL,
+                        updated_at = excluded.updated_at
+                    """,
+                    (event_id, issue_url, utc_now()),
+                )
+
+    def mark_github_failure(self, event_ids: list[str], error: str) -> None:
+        bounded_error = error[:500]
+        with self.session() as connection:
+            for event_id in event_ids:
+                connection.execute(
+                    """
+                    INSERT INTO feedback_github_mirrors (
+                        event_id, status, attempts, issue_url, last_error, updated_at
+                    ) VALUES (?, 'FAILED', 1, NULL, ?, ?)
+                    ON CONFLICT(event_id) DO UPDATE SET
+                        status = 'FAILED',
+                        attempts = feedback_github_mirrors.attempts + 1,
+                        last_error = excluded.last_error,
+                        updated_at = excluded.updated_at
+                    """,
+                    (event_id, bounded_error, utc_now()),
+                )
+
+
+def github_issue_batch(
+    store: FeedbackStore,
+    *,
+    repository: str,
+    token: str,
+    limit: int = 10,
+    max_attempts: int = 5,
+    api_url: str = "https://api.github.com",
+) -> dict[str, Any]:
+    """Mirror already-validated metadata from the server; clients hold no GitHub credential."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        return {"ok": False, "status": "INVALID_REPOSITORY", "retained_locally": True}
+    if len(token.strip()) < 20:
+        return {"ok": False, "status": "MISSING_SERVER_TOKEN", "retained_locally": True}
+    if not api_url.startswith("https://"):
+        return {"ok": False, "status": "HTTPS_REQUIRED", "retained_locally": True}
+
+    rows = store.github_pending(limit=limit, max_attempts=max_attempts)
+    if not rows:
+        return {"ok": True, "status": "NO_PENDING_EVENTS", "mirrored": 0, "retained_locally": True}
+    event_ids = [row["event_id"] for row in rows]
+    batch_id = hashlib.sha256("\n".join(event_ids).encode("utf-8")).hexdigest()[:16]
+    event_lines = []
+    for row in rows:
+        # Four-space indentation keeps each bounded JSON object literal and
+        # prevents event text from becoming active issue Markdown.
+        safe_json = row["payload_json"].replace("@", "@\u200b").replace("\n", " ")
+        event_lines.append("    " + safe_json)
+    body = "\n".join([
+        "Sanitized Goal Supervisor diagnostic metadata accepted by the bounded server schema.",
+        "",
+        f"Batch: `{batch_id}`",
+        f"Events: `{len(rows)}`",
+        "",
+        *event_lines,
+    ])
+    request = urllib.request.Request(
+        f"{api_url.rstrip('/')}/repos/{repository}/issues",
+        data=json.dumps({
+            "title": f"Goal Supervisor feedback batch {batch_id} ({len(rows)})",
+            "body": body,
+            "labels": ["sanitized-feedback"],
+        }, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": "Bearer " + token.strip(),
+            "Content-Type": "application/json",
+            "User-Agent": "codex-goal-supervisor-feedback-mirror",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            result = json.loads(response.read(64 * 1024).decode("utf-8"))
+        issue_url = str(result.get("html_url") or "")
+        if not issue_url:
+            raise ValueError("GitHub response did not include html_url")
+        store.mark_github_mirrored(event_ids, issue_url)
+        return {
+            "ok": True,
+            "status": "MIRRORED",
+            "mirrored": len(event_ids),
+            "issue_url": issue_url,
+            "batch_id": batch_id,
+            "retained_locally": True,
+        }
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
+        store.mark_github_failure(event_ids, type(exc).__name__ + ": " + str(exc))
+        return {
+            "ok": False,
+            "status": "MIRROR_FAILED_RETAINED_LOCALLY",
+            "mirrored": 0,
+            "queued": len(event_ids),
+            "batch_id": batch_id,
+            "error": type(exc).__name__,
+            "retained_locally": True,
+        }
 
 
 class FeedbackServer(ThreadingHTTPServer):
@@ -442,6 +595,19 @@ def command_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_mirror_github(args: argparse.Namespace) -> int:
+    result = github_issue_batch(
+        FeedbackStore(args.db),
+        repository=args.repository,
+        token=os.environ.get(args.token_env, ""),
+        limit=args.limit,
+        max_attempts=args.max_attempts,
+        api_url=args.api_url,
+    )
+    print(json.dumps(result, ensure_ascii=False))
+    return 0 if result["ok"] else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -461,6 +627,14 @@ def main() -> int:
     export.add_argument("--after-received-at", default="")
     export.add_argument("--after-event-id", default="")
     export.set_defaults(func=command_export)
+    mirror = sub.add_parser("mirror-github")
+    mirror.add_argument("--db", type=Path, required=True)
+    mirror.add_argument("--repository", required=True)
+    mirror.add_argument("--token-env", default="GOAL_SUPERVISOR_GITHUB_TOKEN")
+    mirror.add_argument("--limit", type=int, default=10)
+    mirror.add_argument("--max-attempts", type=int, default=5)
+    mirror.add_argument("--api-url", default="https://api.github.com")
+    mirror.set_defaults(func=command_mirror_github)
     args = parser.parse_args()
     return int(args.func(args))
 

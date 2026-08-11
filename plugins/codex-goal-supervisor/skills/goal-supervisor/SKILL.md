@@ -7,7 +7,7 @@ description: Use when the user explicitly asks to install or use Codex Goal Supe
 
 Codex Goal Supervisor is a project tool, not a mandatory harness. Its supreme rule is:
 
-> Every intervention must create net execution benefit. Skip or simplify any control whose likely process cost exceeds the rework it prevents.
+> Every action taken by the model and every supervisory intervention by this plugin must produce net execution benefit. Any action that may affect other modules without constraint or become noise for the entire project must be managed. If the cost of a control by this plugin exceeds the rework it can prevent, that control must remain inactive.
 
 Treat its capabilities as a collection of goal-mode problem-solving skills, not
 as a worker that takes over the product task. It may teach the execution agent
@@ -142,6 +142,7 @@ checkpoint into the main thread.
 - Before claiming remote delivery, require `upload_ready=true` and an event result with `uploaded=true`. `captured=true` alone means only that the durable local outbox accepted the event. Automatic registration or delivery failure leaves the event queued locally and never blocks product work.
 - "Stop uploading" or equivalent immediately runs `feedback-config --deny-upload`. Retain the local outbox unless the user separately asks to remove it.
 - There is no web, file, ZIP, multipart, or manual upload path. The receiver accepts only the bounded Goal Supervisor JSON event schema; rejected input is represented by hash/size/reason metadata only.
+- An operator may mirror already-accepted sanitized events from the receiver into a dedicated private GitHub repository. This is a server-side archive only: clients receive no GitHub write token or App private key, mirror failure retains the receiver database, and product execution remains unblocked.
 - Never infer upload permission from plugin installation, automatic device registration, an available credential, ordinary error text, or previous consent in another project.
 
 ## Optional Ticket Semantics
@@ -186,6 +187,7 @@ From the plugin root:
 python3 scripts/agency_role_pack.py status
 python3 scripts/agency_role_pack.py list --division healthcare
 python3 scripts/agency_role_pack.py search --query "China manufacturing supplier procurement" --limit 10
+python3 scripts/agency_role_pack.py goal-brief --query "corrugated packaging manufacturing QA" --auto-select
 python3 scripts/agency_role_pack.py show --role specialized/supply-chain-strategist
 python3 scripts/agency_role_pack.py verify
 ```
@@ -193,6 +195,30 @@ python3 scripts/agency_role_pack.py verify
 `search` returns candidates only. `show` returns the exact untruncated upstream
 prompt. The execution thread remains responsible for choosing the role and for
 checking time-sensitive professional claims against current project evidence.
+
+When a detailed Goal would materially benefit from industry knowledge, the main
+thread may explicitly call `goal-brief`. High-confidence auto-selection requires
+multiple task terms outside the raw prompt plus a clear score margin; otherwise
+zero expert input is the correct result. The selected expert returns only
+task-specific domain modules, dependencies, acceptance evidence, failure modes,
+reusable tools, user-facing commercial/compliance questions, and forbidden
+assumptions. The main thread remains the sole Goal author and preserves the
+user's words and confirmed North Star.
+
+## Evidence-Bearing Collaboration
+
+Cross-thread or Codex-plus-GPT collaboration uses asymmetric ownership: one
+main thread owns the Goal and final synthesis, one executor produces artifacts,
+and an optional falsifier challenges evidence. Agreement, praise, restatement,
+or another review request is activity, not progress. Only a new evidence id,
+artifact reference, or accepted state transition counts.
+
+Record a meaningful handoff with `convergence --record-collaboration`. A first
+round without evidence returns `NO_EVIDENCE_WARNING`. Two consecutive rounds
+without evidence return `CONSENSUS_WITHOUT_PROGRESS` and require the threads to
+stop mutual review and execute, validate, or surface one concrete blocker.
+Any evidence-bearing round resets this collaboration counter. Do not create an
+unbounded model-to-model conversation or call the LLM Judge for ordinary notes.
 
 ## Goal Contract
 

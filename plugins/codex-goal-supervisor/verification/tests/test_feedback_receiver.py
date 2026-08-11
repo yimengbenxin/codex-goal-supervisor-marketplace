@@ -198,6 +198,57 @@ class FeedbackReceiverTests(unittest.TestCase):
         )
         self.assertEqual([row["event_id"] for row in second_page], ["event-b"])
 
+    def test_server_side_github_mirror_batches_sanitized_events(self) -> None:
+        store = RECEIVER.FeedbackStore(self.db)
+        self.assertTrue(store.insert(event("github-event-a")))
+        self.assertTrue(store.insert(event("github-event-b")))
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "html_url": "https://github.com/example/private-feedback/issues/17"
+        }).encode("utf-8")
+        with mock.patch.object(RECEIVER.urllib.request, "urlopen", return_value=response) as opened:
+            result = RECEIVER.github_issue_batch(
+                store,
+                repository="example/private-feedback",
+                token="server-only-token-" + "x" * 32,
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mirrored"], 2)
+        request = opened.call_args.args[0]
+        self.assertTrue(request.get_header("Authorization").startswith("Bearer server-only-token-"))
+        self.assertEqual(store.github_pending(), [])
+        self.assertEqual(store.stats()["total"], 2)
+
+    def test_github_mirror_failure_retains_local_events_for_retry(self) -> None:
+        store = RECEIVER.FeedbackStore(self.db)
+        self.assertTrue(store.insert(event("github-event-failed")))
+        with mock.patch.object(
+            RECEIVER.urllib.request,
+            "urlopen",
+            side_effect=urllib.error.URLError("offline"),
+        ):
+            result = RECEIVER.github_issue_batch(
+                store,
+                repository="example/private-feedback",
+                token="server-only-token-" + "x" * 32,
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "MIRROR_FAILED_RETAINED_LOCALLY")
+        self.assertTrue(result["retained_locally"])
+        self.assertEqual([row["event_id"] for row in store.github_pending()], ["github-event-failed"])
+        self.assertEqual(store.stats()["total"], 1)
+
+    def test_client_feedback_transport_contains_no_github_write_credential(self) -> None:
+        client_sources = [
+            PLUGIN_ROOT / "assets/governor-harness/.agent/goal_compass_runtime/feedback.py",
+            PLUGIN_ROOT / "scripts/configure_feedback_client.py",
+        ]
+        for path in client_sources:
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("GOAL_SUPERVISOR_GITHUB_TOKEN", text)
+            self.assertNotIn("github_pat_", text)
+            self.assertNotIn("BEGIN PRIVATE KEY", text)
+
 
 if __name__ == "__main__":
     unittest.main()

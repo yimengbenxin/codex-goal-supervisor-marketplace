@@ -81,6 +81,55 @@ class AgencyRolePackTests(unittest.TestCase):
         self.assertNotIn("selected", rows[0])
         self.assertNotIn("decision", rows[0])
 
+    def test_goal_brief_selects_packaging_expert_as_advisory_input(self) -> None:
+        result = self.run_tool(
+            "goal-brief",
+            "--query", "corrugated paper packaging manufacturing quality assurance",
+            "--auto-select",
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "EXPERT_INPUT_READY")
+        self.assertEqual(
+            payload["selection"]["selected_role"]["id"],
+            "specialized/supply-chain-strategist",
+        )
+        self.assertEqual(payload["authority"], "advisory_goal_input_only")
+        self.assertIn("domain_acceptance_evidence", payload["goal_authoring_contract"]["required_outputs"])
+        self.assertIn("corrugated paper packaging", payload["task"])
+
+    def test_goal_brief_selects_clinical_evidence_expert(self) -> None:
+        result = self.run_tool(
+            "goal-brief",
+            "--query", "clinical trial operations patient safety regulatory evidence",
+            "--auto-select",
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "EXPERT_INPUT_READY")
+        self.assertEqual(
+            payload["selection"]["selected_role"]["id"],
+            "healthcare/healthcare-clinical-evidence-agent",
+        )
+
+    def test_goal_brief_does_not_auto_inject_weak_role_match(self) -> None:
+        result = self.run_tool(
+            "goal-brief", "--query", "change a button color", "--auto-select"
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "NO_HIGH_CONFIDENCE_ROLE")
+        self.assertIsNone(payload["selection"]["selected_role"])
+        self.assertEqual(payload["authority"], "advisory_goal_input_only")
+
+    def test_goal_brief_accepts_explicit_role_without_granting_authority(self) -> None:
+        result = self.run_tool(
+            "goal-brief",
+            "--query", "Define the product acceptance path",
+            "--role", "product/product-manager",
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "EXPERT_INPUT_READY")
+        self.assertEqual(payload["selection"]["method"], "explicit_role")
+        self.assertEqual(payload["authority"], "advisory_goal_input_only")
+
     def test_list_can_filter_one_division(self) -> None:
         result = self.run_tool("list", "--division", "healthcare", "--json")
         rows = json.loads(result.stdout)

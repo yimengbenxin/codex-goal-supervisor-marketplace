@@ -17,6 +17,7 @@ from goal_compass_runtime.convergence import (
     apply_observation,
     empty_state,
     judge_trigger,
+    record_collaboration_round,
     record_iteration,
 )
 from goal_compass_runtime.llm_judge import invoke
@@ -298,6 +299,83 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         persisted = self.read_json(".agent/runtime/convergence_state.json")
         self.assertEqual(persisted["evidence"][0]["evidence_id"], "focused-test-pass")
         self.assertEqual(result["convergence"]["progress"]["completed_criteria_count"], 1)
+
+    def test_two_collaboration_rounds_without_evidence_stop_mutual_review(self) -> None:
+        first = self.json_run(
+            "convergence", "--record-collaboration",
+            "--source-thread", "codex-main",
+            "--target-thread", "gpt-review",
+            "--claim", "The plan looks comprehensive and I agree.",
+        )
+        self.assertEqual(first["convergence"]["collaboration"]["status"], "NO_EVIDENCE_WARNING")
+        second = self.json_run(
+            "convergence", "--record-collaboration",
+            "--source-thread", "gpt-review",
+            "--target-thread", "codex-main",
+            "--claim", "I agree with the assessment and the direction is excellent.",
+        )
+        collaboration = second["convergence"]["collaboration"]
+        self.assertEqual(collaboration["status"], "CONSENSUS_WITHOUT_PROGRESS")
+        self.assertEqual(
+            collaboration["required_action"],
+            "stop_mutual_review_and_execute_validate_or_escalate",
+        )
+        self.assertEqual(
+            self.json_run("status")["convergence"]["collaboration"]["status"],
+            "CONSENSUS_WITHOUT_PROGRESS",
+        )
+
+    def test_collaboration_evidence_resets_no_progress_rounds(self) -> None:
+        state = empty_state()
+        state = record_collaboration_round(
+            state,
+            source="codex-main",
+            target="gpt-review",
+            claim="Please review the plan.",
+            evidence_ids=[],
+            artifact_refs=[],
+            state_transition=None,
+            observed_at="2026-08-12T00:00:00+00:00",
+        )
+        state = record_collaboration_round(
+            state,
+            source="gpt-review",
+            target="codex-main",
+            claim="The focused regression passed and produced a report.",
+            evidence_ids=["focused-regression-pass"],
+            artifact_refs=["reports/focused-regression.json"],
+            state_transition="VALIDATED",
+            observed_at="2026-08-12T00:01:00+00:00",
+        )
+        self.assertEqual(state["collaboration"]["status"], "EVIDENCE_PROGRESS")
+        self.assertEqual(state["collaboration"]["no_evidence_rounds"], 0)
+        self.assertGreaterEqual(state["progress"]["evidence_count"], 2)
+
+    def test_collaboration_praise_alone_never_counts_as_progress(self) -> None:
+        state = record_collaboration_round(
+            empty_state(),
+            source="reviewer",
+            target="executor",
+            claim="Excellent work; fully agreed and approved.",
+            evidence_ids=[],
+            artifact_refs=[],
+            state_transition="AGREED",
+            observed_at="2026-08-12T00:00:00+00:00",
+        )
+        self.assertFalse(state["collaboration"]["last_round"]["progress_made"])
+        self.assertIsNone(state["collaboration"]["last_round"]["state_transition"])
+
+    def test_missing_artifact_reference_does_not_create_cli_progress(self) -> None:
+        result = self.json_run(
+            "convergence", "--record-collaboration",
+            "--source-thread", "executor",
+            "--target-thread", "owner",
+            "--claim", "A report was produced.",
+            "--artifact-ref", "reports/does-not-exist.json",
+        )
+        last_round = result["convergence"]["collaboration"]["last_round"]
+        self.assertEqual(last_round["artifact_refs"], [])
+        self.assertFalse(last_round["progress_made"])
 
 
 class LlmJudgeTests(GoalCompassRepoCase):

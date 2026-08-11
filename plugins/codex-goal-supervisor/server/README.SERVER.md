@@ -38,6 +38,25 @@ web/manual/file upload route. Both public endpoints accept strict JSON only;
 multipart, ZIP, binary, unknown fields, and oversized bodies are rejected. A
 rejection stores only reason, byte count, content type, and body hash.
 
+## Optional Private GitHub Archive
+
+GitHub is a downstream archive, not a client upload endpoint. Only events that
+have already passed the receiver's bounded sanitized schema are eligible. Keep
+the write credential on this server, preferably as a short-lived GitHub App
+installation token. Never copy it into the plugin or a user project.
+
+```bash
+export GOAL_SUPERVISOR_GITHUB_TOKEN='<server-side short-lived token>'
+python3 /home/ubuntu/workspaces/goal-supervisor-feedback/app/feedback_receiver.py \
+  mirror-github \
+  --db /home/ubuntu/workspaces/goal-supervisor-feedback/data/events.sqlite3 \
+  --repository owner/private-feedback-repo
+```
+
+The command creates one bounded issue for up to ten pending events. Success is
+recorded per event. Timeout, authentication failure, or GitHub unavailability
+keeps every event in SQLite for a later retry and does not affect project work.
+
 Export remains server-local:
 
 ```bash
