@@ -60,6 +60,10 @@ EXCLUDED_NAMES = {
     ".coverage",
     "feedback-inbox",
 }
+PRIVATE_SERVER_MARKERS = (
+    b"feedback.xn--15tf697cgrb.xyz",
+    b"xn--15tf697cgrb.xyz",
+)
 
 
 def ignored(_: str, names: list[str]) -> set[str]:
@@ -191,6 +195,18 @@ def validate_distribution(plugin: Path, edition: str = "full") -> None:
         raise RuntimeError("Release manifest identity does not match source.")
     if manifest.get("distributionEdition", "full") != edition:
         raise RuntimeError("Release manifest edition does not match requested distribution.")
+    if edition in {"offline", "update-only"}:
+        private_server_refs = [
+            path.relative_to(plugin).as_posix()
+            for path in plugin.rglob("*")
+            if path.is_file()
+            and any(marker in path.read_bytes() for marker in PRIVATE_SERVER_MARKERS)
+        ]
+        if private_server_refs:
+            raise RuntimeError(
+                "Private feedback-server references remain in a no-feedback edition: "
+                + ", ".join(private_server_refs[:5])
+            )
 
 
 def remove_path(path: Path) -> None:
@@ -268,14 +284,27 @@ def strip_feedback_transport(plugin: Path) -> None:
     for relative in (
         "scripts/configure_feedback_client.py",
         "scripts/fetch_feedback.py",
+        "scripts/publish_verified_release.py",
         "verification/scenarios/run_feedback_matrix.py",
         "verification/tests/test_feedback_receiver.py",
+        "verification/tests/test_release_publish.py",
     ):
         remove_path(plugin / relative)
     remove_path(plugin / "server")
     for path in (plugin / "docs").glob("*FEEDBACK*"):
         remove_path(path)
     remove_path(plugin / "verification")
+
+    auto_update_doc = plugin / "docs" / "PLUGIN_AUTO_UPDATE_20260809.md"
+    if auto_update_doc.is_file():
+        auto_update_text = auto_update_doc.read_text(encoding="utf-8")
+        auto_update_text = replace_between(
+            auto_update_text,
+            "The self-hosted Tencent Git endpoint remains an optional migration/fallback",
+            "Build clean edition-specific marketplace trees before publishing:",
+            "This edition uses its GitHub marketplace channel only. It contains no private feedback-server or asset-server endpoint.\n\nBuild clean edition-specific marketplace trees before publishing:",
+        )
+        write_text(auto_update_doc, auto_update_text)
 
     skill = plugin / "skills" / "goal-supervisor" / "SKILL.md"
     skill_text = skill.read_text(encoding="utf-8")
@@ -353,8 +382,8 @@ def apply_edition(plugin: Path, edition: str) -> None:
         strip_auto_update(plugin)
     manifest["interface"]["capabilities"] = capabilities
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    remove_path(plugin / "scripts" / "release_variants")
     if edition != "full":
+        remove_path(plugin / "scripts" / "release_variants")
         remove_path(plugin / "scripts" / "build_plugin_release.py")
     edition_text = {
         "offline": "No automatic updater and no feedback upload transport are present. Redacted diagnostics stay local.",

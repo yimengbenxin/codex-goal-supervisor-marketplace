@@ -16,7 +16,9 @@ except ImportError:
 from goal_compass_runtime.convergence import (
     apply_observation,
     empty_state,
+    external_prerequisite_stop_review,
     judge_trigger,
+    record_blocker_scope_review,
     record_collaboration_round,
     record_iteration,
 )
@@ -133,6 +135,76 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         compact = self.json_run("status")["convergence"]["goal_stack"]["goal_contract"]
         self.assertEqual(compact["module_count"], 2)
         self.assertEqual(compact["final_acceptance_count"], 1)
+
+    def test_external_prerequisite_requires_one_goal_wide_scope_check(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["l0_final_goal"] = "Deliver the complete Personal AI OS product."
+        state["goal_stack"]["goal_contract"] = {
+            "modules": [
+                {"node_id": "N1", "name": "iPhone path"},
+                {"node_id": "N2", "name": "Watch path"},
+                {"node_id": "N3", "name": "RayNeo path"},
+                {"node_id": "N4", "name": "Shared session"},
+            ],
+            "module_count_total": 4,
+            "projection_truncated": False,
+            "final_acceptance": [{"criterion": "Run the complete field demo three times."}],
+        }
+
+        review = external_prerequisite_stop_review(
+            state,
+            "已进入安全暂停。等待你物理打开 Wi-Fi 后才能继续。",
+        )
+
+        self.assertTrue(review["should_continue"])
+        self.assertEqual(review["status"], "REQUIRES_SCOPE_CHECK")
+        self.assertIn("iPhone path", review["reason"])
+        self.assertIn("RayNeo path", review["reason"])
+        recorded = record_blocker_scope_review(
+            state,
+            review=review,
+            observed_at="2026-08-12T00:00:00+00:00",
+        )
+        recovery = recorded["recovery"]
+        self.assertEqual(recovery["blocker_scope_review"]["goal_module_count"], 4)
+        self.assertNotIn("Wi-Fi", json.dumps(recovery, ensure_ascii=False))
+
+    def test_external_prerequisite_scope_check_never_loops(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["l0_final_goal"] = "Deliver the verified product."
+        state["goal_stack"]["l1_success_criteria"] = [{"criterion": "The product regression passes."}]
+
+        review = external_prerequisite_stop_review(
+            state,
+            "Waiting for the user to connect the physical device before continuing.",
+            stop_hook_active=True,
+        )
+
+        self.assertFalse(review["should_continue"])
+
+    def test_external_prerequisite_does_not_claim_goal_review_without_goal_structure(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["l0_final_goal"] = "Deliver the verified product."
+
+        review = external_prerequisite_stop_review(
+            state,
+            "Waiting for the user to connect the physical device before continuing.",
+        )
+
+        self.assertFalse(review["should_continue"])
+        self.assertEqual(review["status"], "INSUFFICIENT_GOAL_STRUCTURE")
+
+    def test_continuing_around_external_prerequisite_is_not_interrupted(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["l0_final_goal"] = "Deliver the verified product."
+        state["goal_stack"]["l1_success_criteria"] = [{"criterion": "The product regression passes."}]
+
+        review = external_prerequisite_stop_review(
+            state,
+            "无需等待物理 Wi-Fi，我会继续推进其他可执行模块。",
+        )
+
+        self.assertFalse(review["should_continue"])
 
     def test_completed_phase_clears_current_stage_and_action(self) -> None:
         self.cli("phase-set", "--id", "P1", "--goal", "Verify the bounded change", "--exit-criterion", "tests pass")

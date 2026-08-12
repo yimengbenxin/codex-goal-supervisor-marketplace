@@ -47,7 +47,10 @@ class AgencyRolePackTests(unittest.TestCase):
         self.assertEqual(manifest["role_count"], 270)
         self.assertEqual(manifest["division_count"], 17)
         self.assertEqual(manifest["raw_prompt_policy"], "byte_for_byte_upstream_snapshot")
-        self.assertEqual(manifest["selection_policy"], "optional_main_thread_choice")
+        self.assertEqual(
+            manifest["selection_policy"],
+            "high_confidence_required_low_confidence_user_choice",
+        )
         self.assertEqual(manifest["authority"], "expert_reference_not_final_decision_maker")
         self.assertEqual(len(manifest["source"]["commit"]), 40)
         self.assertEqual(manifest["source"]["license"], "MIT")
@@ -94,6 +97,7 @@ class AgencyRolePackTests(unittest.TestCase):
             "specialized/supply-chain-strategist",
         )
         self.assertEqual(payload["authority"], "advisory_goal_input_only")
+        self.assertEqual(payload["required_action"], "load_selected_expert_and_apply_to_goal")
         self.assertIn("domain_acceptance_evidence", payload["goal_authoring_contract"]["required_outputs"])
         self.assertIn("corrugated paper packaging", payload["task"])
 
@@ -115,9 +119,24 @@ class AgencyRolePackTests(unittest.TestCase):
             "goal-brief", "--query", "change a button color", "--auto-select"
         )
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["status"], "NO_HIGH_CONFIDENCE_ROLE")
+        self.assertEqual(payload["status"], "NO_RELEVANT_EXPERT")
         self.assertIsNone(payload["selection"]["selected_role"])
+        self.assertEqual(payload["selection"]["eligible_choices"], [])
+        self.assertEqual(payload["required_action"], "continue_without_expert")
         self.assertEqual(payload["authority"], "advisory_goal_input_only")
+
+    def test_goal_brief_asks_once_for_low_confidence_domain_choice(self) -> None:
+        result = self.run_tool(
+            "goal-brief",
+            "--query", "manufacturing quality process improvement",
+            "--auto-select",
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "EXPERT_CHOICE_REQUIRED")
+        self.assertEqual(payload["selection"]["confidence"], "low")
+        self.assertIsNone(payload["selection"]["selected_role"])
+        self.assertTrue(payload["selection"]["eligible_choices"])
+        self.assertEqual(payload["required_action"], "ask_user_once_to_choose_candidate_or_skip")
 
     def test_goal_brief_accepts_explicit_role_without_granting_authority(self) -> None:
         result = self.run_tool(
@@ -128,6 +147,7 @@ class AgencyRolePackTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "EXPERT_INPUT_READY")
         self.assertEqual(payload["selection"]["method"], "explicit_role")
+        self.assertEqual(payload["required_action"], "load_selected_expert_and_apply_to_goal")
         self.assertEqual(payload["authority"], "advisory_goal_input_only")
 
     def test_list_can_filter_one_division(self) -> None:
@@ -169,7 +189,7 @@ class AgencyRolePackTests(unittest.TestCase):
                 "role_count": 1,
                 "division_count": 1,
                 "raw_prompt_policy": "byte_for_byte_upstream_snapshot",
-                "selection_policy": "optional_main_thread_choice",
+                "selection_policy": "high_confidence_required_low_confidence_user_choice",
                 "authority": "expert_reference_not_final_decision_maker",
                 "source": {
                     "commit": commit,

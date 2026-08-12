@@ -126,6 +126,172 @@ class PluginHookTests(unittest.TestCase):
         state = json.loads((self.repo / ".agent/runtime/goal_return/state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["sessions"]["hook-goal-return"]["interrupts"][-1]["state"], "CLOSED")
 
+    def test_long_term_goal_change_asks_once_only_after_high_confidence_judgment(self) -> None:
+        self.cli("goal-set", "--text", "Build a private LAN Agent Registry for reusable internal Agent packages.")
+        north_path = self.repo / ".agent" / "north_star_goal.json"
+        north = json.loads(north_path.read_text(encoding="utf-8"))
+        north["goal_mode_objective"] = "Private LAN Agent Registry execution contract. " + ("validated internal package workflow. " * 35)
+        north["goal_definition"] = {
+            "precise_goal": north["goal"],
+            "process": {"nodes": [
+                {"node_id": "N1", "name": "Package intake", "objective": "Validate internal packages."},
+                {"node_id": "N2", "name": "Registry retrieval", "objective": "Search internal packages."},
+            ]},
+            "final_acceptance": [{"criterion": "Internal packages can be uploaded, searched, and downloaded."}],
+        }
+        north_path.write_text(json.dumps(north, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        fake = self.repo / "fake_goal_change_judge.py"
+        log = self.repo / "fake_goal_change_judge.log"
+        fake.write_text(
+            "import json, os, pathlib, sys\n"
+            "args=sys.argv[1:]\n"
+            "prompt=sys.stdin.read()\n"
+            "pathlib.Path(args[args.index('-o')+1]).write_text(json.dumps({"
+            "'verdict':'CONFIRM_GOAL_CHANGE','confidence':'high',"
+            "'rationale':'This is a durable product pivot outside the current registry goal.',"
+            "'recommended_action':'ask_user_to_confirm_goal_change','evidence_needed':[]}), encoding='utf-8')\n"
+            "with pathlib.Path(os.environ['FAKE_JUDGE_LOG']).open('a', encoding='utf-8') as h: h.write(json.dumps({'called':True,'prompt':prompt})+'\\n')\n",
+            encoding="utf-8",
+        )
+        old_cmd = os.environ.get("GOAL_SUPERVISOR_JUDGE_CMD")
+        try:
+            os.environ.pop("GOAL_SUPERVISOR_DISABLE_LLM_JUDGE", None)
+            os.environ["GOAL_SUPERVISOR_JUDGE_CMD"] = shlex.join([sys.executable, str(fake)])
+            os.environ["FAKE_JUDGE_LOG"] = str(log)
+            event = {
+                "session_id": "goal-change-hook",
+                "turn_id": "direction-1",
+                "cwd": str(self.repo),
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "从现在起产品长期方向转向面向公众的量化交易平台，核心交付改为券商交易执行。",
+            }
+            first = self.hook(event)
+            second = self.hook({**event, "turn_id": "direction-2"})
+            confirmed = self.hook({
+                **event,
+                "turn_id": "direction-confirm",
+                "prompt": "确认更新北极星",
+            })
+        finally:
+            os.environ["GOAL_SUPERVISOR_DISABLE_LLM_JUDGE"] = "1"
+            os.environ.pop("FAKE_JUDGE_LOG", None)
+            if old_cmd is None:
+                os.environ.pop("GOAL_SUPERVISOR_JUDGE_CMD", None)
+            else:
+                os.environ["GOAL_SUPERVISOR_JUDGE_CMD"] = old_cmd
+
+        self.assertIn("是否确认更新北极星指标", first)
+        self.assertEqual(second, "")
+        self.assertIn("goal-set --replace-existing --require-detailed", confirmed)
+        unchanged = json.loads(north_path.read_text(encoding="utf-8"))
+        self.assertEqual(unchanged["goal"], "Build a private LAN Agent Registry for reusable internal Agent packages.")
+        self.assertEqual(len(log.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_temporary_or_contained_goal_request_does_not_ask_for_goal_change(self) -> None:
+        self.cli("goal-set", "--text", "Build a private LAN Agent Registry for reusable internal Agent packages.")
+        north_path = self.repo / ".agent" / "north_star_goal.json"
+        north = json.loads(north_path.read_text(encoding="utf-8"))
+        north["goal_mode_objective"] = "Private LAN Agent Registry execution contract. " + ("internal package upload search download. " * 35)
+        north_path.write_text(json.dumps(north, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        common = {"session_id": "goal-change-negative", "cwd": str(self.repo), "hook_event_name": "UserPromptSubmit"}
+
+        temporary = self.hook({**common, "turn_id": "temporary", "prompt": "临时检查一下量化 API 返回格式。"})
+        contained = self.hook({
+            **common,
+            "turn_id": "contained",
+            "prompt": "以后产品方向继续围绕私有局域网 Agent Registry，重点完成内部 Agent 包上传、搜索和下载。",
+        })
+
+        self.assertNotIn("Goal Direction Check", temporary)
+        self.assertNotIn("更新北极星", contained)
+
+    def test_explicit_goal_change_confirmation_survives_session_change(self) -> None:
+        self.cli("goal-set", "--text", "Build a private LAN Agent Registry for reusable internal Agent packages.")
+        north_path = self.repo / ".agent" / "north_star_goal.json"
+        north = json.loads(north_path.read_text(encoding="utf-8"))
+        north["goal_mode_objective"] = "Private LAN Agent Registry execution contract. " + ("validated internal package workflow. " * 35)
+        north["goal_definition"] = {
+            "precise_goal": north["goal"],
+            "process": {"nodes": [
+                {"node_id": "N1", "name": "Package intake"},
+                {"node_id": "N2", "name": "Registry retrieval"},
+            ]},
+            "final_acceptance": [{"criterion": "Internal package loop works."}],
+        }
+        north_path.write_text(json.dumps(north, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        first = self.hook({
+            "session_id": "goal-change-before-compaction",
+            "turn_id": "direction-1",
+            "cwd": str(self.repo),
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "把北极星改成面向公众的量化交易平台。",
+        })
+        repeated = self.hook({
+            "session_id": "goal-change-after-compaction",
+            "turn_id": "direction-2",
+            "cwd": str(self.repo),
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "将北极星改为公开量化交易与券商执行平台。",
+        })
+        confirmed = self.hook({
+            "session_id": "goal-change-after-compaction",
+            "turn_id": "direction-confirm",
+            "cwd": str(self.repo),
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "确认更新北极星",
+        })
+
+        self.assertIn("是否确认更新北极星指标", first)
+        self.assertEqual(repeated, "")
+        self.assertIn("goal-set --replace-existing --require-detailed", confirmed)
+
+    def test_uncertain_goal_change_judgment_stays_silent(self) -> None:
+        self.cli("goal-set", "--text", "Build a private LAN Agent Registry for reusable internal Agent packages.")
+        north_path = self.repo / ".agent" / "north_star_goal.json"
+        north = json.loads(north_path.read_text(encoding="utf-8"))
+        north["goal_mode_objective"] = "Private LAN Agent Registry execution contract. " + ("validated internal package workflow. " * 35)
+        north["goal_definition"] = {
+            "precise_goal": north["goal"],
+            "process": {"nodes": [
+                {"node_id": "N1", "name": "Package intake"},
+                {"node_id": "N2", "name": "Registry retrieval"},
+            ]},
+            "final_acceptance": [{"criterion": "Internal package loop works."}],
+        }
+        north_path.write_text(json.dumps(north, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        fake = self.repo / "fake_uncertain_goal_change_judge.py"
+        fake.write_text(
+            "import json, pathlib, sys\n"
+            "args=sys.argv[1:]\n"
+            "sys.stdin.read()\n"
+            "pathlib.Path(args[args.index('-o')+1]).write_text(json.dumps({"
+            "'verdict':'INSUFFICIENT_EVIDENCE','confidence':'low',"
+            "'rationale':'The request may be a bounded exploration.',"
+            "'recommended_action':'continue_without_goal_change_prompt','evidence_needed':[]}), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        old_cmd = os.environ.get("GOAL_SUPERVISOR_JUDGE_CMD")
+        try:
+            os.environ.pop("GOAL_SUPERVISOR_DISABLE_LLM_JUDGE", None)
+            os.environ["GOAL_SUPERVISOR_JUDGE_CMD"] = shlex.join([sys.executable, str(fake)])
+            output = self.hook({
+                "session_id": "uncertain-goal-change",
+                "turn_id": "direction-1",
+                "cwd": str(self.repo),
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "以后产品方向可能转向面向公众的量化交易平台，先探索一下。",
+            })
+        finally:
+            os.environ["GOAL_SUPERVISOR_DISABLE_LLM_JUDGE"] = "1"
+            if old_cmd is None:
+                os.environ.pop("GOAL_SUPERVISOR_JUDGE_CMD", None)
+            else:
+                os.environ["GOAL_SUPERVISOR_JUDGE_CMD"] = old_cmd
+
+        self.assertNotIn("Goal Direction Check", output)
+        self.assertNotIn("更新北极星", output)
+
     def test_repo_hook_restores_goal_after_compaction(self) -> None:
         self.cli("goal-set", "--text", "Build a reliable local product.")
         common = {"session_id": "hook-compact", "cwd": str(self.repo)}
@@ -533,6 +699,54 @@ class PluginHookTests(unittest.TestCase):
             "hook_event_name": "Stop",
             "stop_hook_active": False,
             "last_assistant_message": "北极星目标已完成。",
+        })
+
+        self.assertEqual(json.loads(output), {})
+
+    def test_stop_hook_continues_once_when_local_prerequisite_is_treated_as_global(self) -> None:
+        north = self.repo / ".agent/north_star_goal.json"
+        payload = json.loads(north.read_text(encoding="utf-8"))
+        payload.update({
+            "confirmed": True,
+            "goal": "Deliver the complete Personal AI OS product.",
+            "goal_definition": {
+                "quality": "STRUCTURED_DETAILED",
+                "success_criteria": ["All product paths reach their acceptance evidence."],
+                "process": {"nodes": [
+                    {"node_id": "N1", "name": "iPhone path"},
+                    {"node_id": "N2", "name": "Watch path"},
+                    {"node_id": "N3", "name": "RayNeo path"},
+                    {"node_id": "N4", "name": "Shared session"},
+                ]},
+                "final_acceptance": [{"criterion": "Run the complete field demo three times."}],
+            },
+        })
+        north.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        self.cli("init")
+
+        output = self.hook({
+            "cwd": str(self.repo),
+            "hook_event_name": "Stop",
+            "stop_hook_active": False,
+            "last_assistant_message": "已进入安全暂停。等待你物理打开 Wi-Fi 后才能继续。",
+        })
+
+        result = json.loads(output)
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("DEFERRED_LOCAL", result["reason"])
+        self.assertIn("iPhone path", result["reason"])
+        self.assertIn("Shared session", result["reason"])
+        state = json.loads((self.repo / ".agent/runtime/convergence_state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["recovery"]["blocker_scope_review"]["status"], "REQUIRES_SCOPE_CHECK")
+
+    def test_stop_hook_scope_check_does_not_reblock_forced_follow_up(self) -> None:
+        self.cli("goal-set", "--text", "Deliver a verified local product.")
+
+        output = self.hook({
+            "cwd": str(self.repo),
+            "hook_event_name": "Stop",
+            "stop_hook_active": True,
+            "last_assistant_message": "All remaining paths require the user to connect the physical device, so I must pause.",
         })
 
         self.assertEqual(json.loads(output), {})

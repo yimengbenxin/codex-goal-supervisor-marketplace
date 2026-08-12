@@ -14,6 +14,7 @@ TEST_MODULES = [
     "verification.tests.test_onboard_scan",
     "verification.tests.test_install",
     "verification.tests.test_plugin_auto_update",
+    "verification.tests.test_release_publish",
     "verification.tests.test_release_editions",
     "verification.tests.test_performance",
     "verification.tests.test_status",

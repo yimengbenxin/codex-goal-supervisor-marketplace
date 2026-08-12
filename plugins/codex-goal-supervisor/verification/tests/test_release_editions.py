@@ -45,6 +45,15 @@ class ReleaseEditionTests(unittest.TestCase):
                 self.assertIn("## Edition Boundary", readme)
                 self.assertIn("codex plugin marketplace add", readme)
                 self.assertIn("Project use remains explicit opt-in", readme)
+                plugin = output / "plugins/codex-goal-supervisor"
+                self.assertTrue((plugin / "assets/governor-harness/.agent/goal_compass.py").is_file())
+                self.assertTrue((plugin / "assets/role-packs/agency-agents/manifest.json").is_file())
+                self.assertEqual(list(plugin.rglob("*.remote.json")), [])
+                if edition == "update-only":
+                    for path in (item for item in plugin.rglob("*") if item.is_file()):
+                        raw = path.read_bytes()
+                        self.assertNotIn(b"feedback.xn--15tf697cgrb.xyz", raw, str(path))
+                        self.assertNotIn(b"xn--15tf697cgrb.xyz", raw, str(path))
 
     def test_three_editions_are_physically_distinct_and_runnable(self) -> None:
         with tempfile.TemporaryDirectory(prefix="goal-supervisor-editions-") as temporary:
@@ -80,6 +89,7 @@ class ReleaseEditionTests(unittest.TestCase):
                 self.assertFalse((plugin / "verification").exists())
                 self.assertFalse((plugin / "scripts/configure_feedback_client.py").exists())
                 self.assertFalse((plugin / "scripts/fetch_feedback.py").exists())
+                self.assertFalse((plugin / "scripts/publish_verified_release.py").exists())
                 feedback = (plugin / "assets/governor-harness/.agent/goal_compass_runtime/feedback.py").read_text(encoding="utf-8")
                 compass = (plugin / "assets/governor-harness/.agent/goal_compass.py").read_text(encoding="utf-8")
                 installer = (plugin / "scripts/install_governor.py").read_text(encoding="utf-8")
@@ -94,6 +104,9 @@ class ReleaseEditionTests(unittest.TestCase):
             self.assertTrue((update_only / "scripts/configure_plugin_auto_update.py").is_file())
             self.assertTrue((full / "server/feedback_receiver.py").is_file())
             self.assertTrue((full / "scripts/plugin_auto_update.py").is_file())
+            self.assertTrue((full / "scripts/release_variants/feedback_local.py").is_file())
+            self.assertFalse((offline / "scripts/release_variants").exists())
+            self.assertFalse((update_only / "scripts/release_variants").exists())
 
 
 if __name__ == "__main__":

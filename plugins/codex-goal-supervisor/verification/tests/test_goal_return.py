@@ -17,12 +17,16 @@ from goal_compass_runtime.goal_return import (
     SUPERSEDED,
     classify_prompt,
     compact_status,
+    goal_change_candidate,
+    goal_change_response,
     on_post_compact,
     on_pre_compact,
     on_session_start,
     on_stop,
     on_tool_event,
     on_user_prompt,
+    record_goal_change_confirmation,
+    resolve_goal_change_confirmation,
 )
 
 
@@ -110,6 +114,141 @@ class GoalReturnTests(GoalCompassRepoCase):
     def interrupt(self) -> dict:
         rows = self.state_json()["sessions"][self.session_id]["interrupts"]
         return rows[-1]
+
+    def make_long_goal(self) -> tuple[dict, dict]:
+        north = self.north()
+        north["goal"] = "Build a private LAN Agent Registry for reusable internal Agent packages."
+        north["goal_mode_objective"] = "Private LAN Agent Registry execution contract. " + ("validated internal package workflow. " * 35)
+        north["goal_definition"] = {
+            "precise_goal": north["goal"],
+            "process": {
+                "nodes": [
+                    {"node_id": "N1", "name": "Package intake", "objective": "Validate internal Agent packages."},
+                    {"node_id": "N2", "name": "Registry retrieval", "objective": "Search and download validated packages."},
+                ]
+            },
+            "final_acceptance": [{"criterion": "Internal packages can be uploaded, searched, and downloaded."}],
+        }
+        convergence = self.convergence()
+        convergence["goal_stack"] = {
+            "l0_final_goal": north["goal"],
+            "l1_success_criteria": [{"criterion": "Validated internal package loop works."}],
+            "goal_contract": {
+                "objective": north["goal"],
+                "modules": [
+                    {"node_id": "N1", "name": "Package intake", "objective": "Validate internal Agent packages."},
+                    {"node_id": "N2", "name": "Registry retrieval", "objective": "Search validated packages."},
+                ],
+                "final_acceptance": [{"criterion": "Internal package loop works."}],
+            },
+        }
+        return north, convergence
+
+    def test_goal_change_candidate_requires_durable_out_of_scope_direction(self) -> None:
+        north, convergence = self.make_long_goal()
+
+        candidate = goal_change_candidate(
+            north,
+            convergence,
+            "从现在起产品长期方向转向面向公众的量化交易平台，核心交付改为券商交易执行。",
+        )
+        explicit = goal_change_candidate(north, convergence, "把北极星改成面向公众的量化交易平台。")
+        temporary = goal_change_candidate(north, convergence, "临时检查一下量化 API 的返回格式。")
+        contained = goal_change_candidate(
+            north,
+            convergence,
+            "以后产品方向继续围绕私有局域网 Agent Registry，重点完成内部 Agent 包上传和检索。",
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertFalse(candidate["explicit"])
+        self.assertIsNotNone(explicit)
+        self.assertTrue(explicit["explicit"])
+        self.assertIsNone(temporary)
+        self.assertIsNone(contained)
+
+    def test_short_goal_never_opens_direction_change_confirmation(self) -> None:
+        north = self.north()
+        north["goal"] = "Fix one local button label."
+        north["goal_mode_objective"] = "Fix one local button label and verify it."
+        north["goal_definition"] = {
+            "precise_goal": north["goal"],
+            "process": {"nodes": [{"node_id": "N1", "name": "Button label"}]},
+            "final_acceptance": [{"criterion": "The label is correct."}],
+        }
+
+        candidate = goal_change_candidate(
+            north,
+            self.convergence(),
+            "从现在起产品长期方向转向公开量化交易平台。",
+        )
+
+        self.assertIsNone(candidate)
+
+    def test_goal_change_confirmation_is_recorded_only_once(self) -> None:
+        north, convergence = self.make_long_goal()
+        candidate = goal_change_candidate(
+            north,
+            convergence,
+            "从现在起产品长期方向转向面向公众的量化交易平台，核心交付改为券商交易执行。",
+        )
+        event = self.event("UserPromptSubmit", prompt=candidate["summary"], turn_id="goal-change")
+
+        first = record_goal_change_confirmation(
+            self.state, self.lock, self.events, north, event, candidate,
+            {"status": "COMPLETED", "verdict": "CONFIRM_GOAL_CHANGE", "confidence": "high"},
+        )
+        second = record_goal_change_confirmation(
+            self.state, self.lock, self.events, north, event, candidate,
+            {"status": "CACHED", "verdict": "CONFIRM_GOAL_CHANGE", "confidence": "high"},
+        )
+        reworded = dict(candidate)
+        reworded["candidate_id"] = "different-wording"
+        other_session = dict(event)
+        other_session["session_id"] = "new-session-after-compaction"
+        third = record_goal_change_confirmation(
+            self.state, self.lock, self.events, north, other_session, reworded,
+            {"status": "COMPLETED", "verdict": "CONFIRM_GOAL_CHANGE", "confidence": "high"},
+        )
+        resolved = resolve_goal_change_confirmation(
+            self.state, self.lock, self.events, north, other_session, "CONFIRMED",
+        )
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertFalse(third)
+        self.assertEqual(resolved["status"], "CONFIRMED")
+        self.assertEqual(goal_change_response("确认更新北极星"), "CONFIRMED")
+        self.assertEqual(goal_change_response("保持原北极星，不要修改"), "DISMISSED")
+        self.assertIsNone(goal_change_response("为什么要确认更新北极星？"))
+        self.assertEqual(classify_prompt("为什么要确认更新北极星？"), "QUESTION_ONLY")
+
+    def test_concurrent_goal_change_candidates_open_one_project_confirmation(self) -> None:
+        north, convergence = self.make_long_goal()
+
+        def exercise(index: int) -> bool:
+            prompt = f"把北极星改成面向公众的量化交易平台，并完成券商执行方向 {index}。"
+            candidate = goal_change_candidate(north, convergence, prompt)
+            event = self.event(
+                "UserPromptSubmit",
+                prompt=prompt,
+                turn_id=f"goal-change-{index}",
+                session_id=f"goal-session-{index}",
+            )
+            return record_goal_change_confirmation(
+                self.state, self.lock, self.events, north, event, candidate,
+                {"status": "COMPLETED", "verdict": "CONFIRM_GOAL_CHANGE", "confidence": "high"},
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(exercise, range(8)))
+
+        self.assertEqual(results.count(True), 1)
+        pending = [
+            row for row in self.state_json().get("goal_change_candidates", [])
+            if row.get("status") == "CONFIRMATION_REQUESTED"
+        ]
+        self.assertEqual(len(pending), 1)
 
     def test_question_closes_after_one_stop(self) -> None:
         context = self.prompt("插一句：这个字段是什么意思？")

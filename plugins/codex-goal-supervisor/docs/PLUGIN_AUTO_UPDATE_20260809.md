@@ -47,6 +47,21 @@ retain the configured interval guard.
 
 ## Distribution Contract
 
+Every completed local version must be published through the verified release
+command before it is considered delivered:
+
+```bash
+python3 scripts/publish_verified_release.py
+```
+
+The command refuses an uncommitted checkout, runs source and extracted-package
+verification, builds all three ZIP editions, pushes the canonical source and
+the separate full/update-only marketplaces, creates the GitHub Release with a
+SHA-256 manifest, and clones both remote marketplaces again to verify the
+published version. Use `--dry-run` to exercise the complete build and
+verification path without network writes. Do not publish on every file save:
+only a committed, fully verified release may reach client update channels.
+
 The default sources are:
 
 ```text
