@@ -26,6 +26,9 @@ EMPTY_REUSE_FIXTURE = PLUGIN_ROOT / "verification" / "fixtures" / "reuse_probe_e
 # Verification must never depend on public network availability. Individual
 # reuse-probe tests temporarily replace this deterministic empty search result.
 os.environ.setdefault("GOAL_COMPASS_REUSE_PROBE_FIXTURE", str(EMPTY_REUSE_FIXTURE))
+# Detailed Goal tests validate the route contract in process. They do not start
+# one detached dashboard per fixture; roadmap server tests opt in explicitly.
+os.environ.setdefault("GOAL_SUPERVISOR_DISABLE_ROADMAP_SERVER", "1")
 
 DEFAULT_TIMEOUT = 8
 LONG_TIMEOUT = 20
@@ -63,8 +66,9 @@ def copy_goal_compass_runtime(root: Path, *, writable: bool = False) -> None:
     _link_or_copy(SCRIPT, agent / "goal_compass.py", writable)
     runtime_target = agent / "goal_compass_runtime"
     runtime_target.mkdir(parents=True, exist_ok=True)
-    for source in RUNTIME_PACKAGE.glob("*.py"):
-        _link_or_copy(source, runtime_target / source.name, writable)
+    for pattern in ("*.py", "*.html"):
+        for source in RUNTIME_PACKAGE.glob(pattern):
+            _link_or_copy(source, runtime_target / source.name, writable)
 
 
 def install_product_test_fixtures(root: Path) -> None:

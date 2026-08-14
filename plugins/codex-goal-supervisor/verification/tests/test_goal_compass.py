@@ -28,6 +28,7 @@ TEST_MODULES = [
     "verification.tests.test_feedback_receiver",
     "verification.tests.test_v2_tool_mode",
     "verification.tests.test_convergence",
+    "verification.tests.test_roadmap",
     "verification.tests.test_context_continuity",
     "verification.tests.test_goal_return",
     "verification.tests.test_deviation_incidents",
