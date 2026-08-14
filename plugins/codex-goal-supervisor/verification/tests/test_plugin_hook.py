@@ -805,7 +805,7 @@ class PluginHookTests(unittest.TestCase):
 
         self.assertEqual(json.loads(output), {})
 
-    def test_stop_hook_continues_once_when_local_prerequisite_is_treated_as_global(self) -> None:
+    def test_stop_hook_selects_concrete_path_when_local_prerequisite_is_treated_as_global(self) -> None:
         north = self.repo / ".agent/north_star_goal.json"
         payload = json.loads(north.read_text(encoding="utf-8"))
         payload.update({
@@ -837,21 +837,52 @@ class PluginHookTests(unittest.TestCase):
         self.assertEqual(result["decision"], "block")
         self.assertIn("DEFERRED_LOCAL", result["reason"])
         self.assertIn("iPhone path", result["reason"])
-        self.assertIn("Shared session", result["reason"])
+        self.assertIn("use tools now", result["reason"])
         state = json.loads((self.repo / ".agent/runtime/convergence_state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["recovery"]["blocker_scope_review"]["status"], "REQUIRES_SCOPE_CHECK")
+        self.assertEqual(state["recovery"]["blocker_scope_review"]["status"], "CONTINUE_INDEPENDENT_PATH")
 
-    def test_stop_hook_scope_check_does_not_reblock_forced_follow_up(self) -> None:
-        self.cli("goal-set", "--text", "Deliver a verified local product.")
+    def test_stop_hook_retries_planning_only_follow_up_once_without_looping(self) -> None:
+        north = self.repo / ".agent/north_star_goal.json"
+        payload = json.loads(north.read_text(encoding="utf-8"))
+        payload.update({
+            "confirmed": True,
+            "goal": "Deliver a verified local product.",
+            "goal_definition": {
+                "quality": "STRUCTURED_DETAILED",
+                "success_criteria": ["The product regression passes."],
+                "process": {"nodes": [
+                    {"node_id": "N1", "name": "Device path", "objective": "Run the physical device path."},
+                    {"node_id": "N2", "name": "Offline validation", "objective": "Run independent offline checks."},
+                ]},
+            },
+        })
+        north.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        self.cli("init")
 
-        output = self.hook({
+        first = self.hook({
+            "cwd": str(self.repo),
+            "hook_event_name": "Stop",
+            "stop_hook_active": False,
+            "last_assistant_message": "Waiting for the user to connect the physical device before continuing.",
+        })
+        self.assertEqual(json.loads(first)["decision"], "block")
+
+        retry = self.hook({
             "cwd": str(self.repo),
             "hook_event_name": "Stop",
             "stop_hook_active": True,
-            "last_assistant_message": "All remaining paths require the user to connect the physical device, so I must pause.",
+            "last_assistant_message": "I still need the user to connect the physical device before continuing.",
         })
+        self.assertEqual(json.loads(retry)["decision"], "block")
+        self.assertIn("Do not return another plan", json.loads(retry)["reason"])
 
-        self.assertEqual(json.loads(output), {})
+        exhausted = self.hook({
+            "cwd": str(self.repo),
+            "hook_event_name": "Stop",
+            "stop_hook_active": True,
+            "last_assistant_message": "I still need the user to connect the physical device before continuing.",
+        })
+        self.assertEqual(json.loads(exhausted), {})
 
     def test_large_read_is_recorded_locally_without_main_thread_injection(self) -> None:
         target = self.repo / "docs" / "large-history.md"

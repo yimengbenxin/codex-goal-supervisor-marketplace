@@ -225,7 +225,7 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         self.assertEqual(compact["module_count"], 2)
         self.assertEqual(compact["final_acceptance_count"], 1)
 
-    def test_external_prerequisite_requires_one_goal_wide_scope_check(self) -> None:
+    def test_external_prerequisite_selects_dependency_ready_goal_path(self) -> None:
         state = empty_state()
         state["goal_stack"]["l0_final_goal"] = "Deliver the complete Personal AI OS product."
         state["goal_stack"]["goal_contract"] = {
@@ -246,9 +246,10 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         )
 
         self.assertTrue(review["should_continue"])
-        self.assertEqual(review["status"], "REQUIRES_SCOPE_CHECK")
+        self.assertEqual(review["status"], "CONTINUE_INDEPENDENT_PATH")
         self.assertIn("iPhone path", review["reason"])
         self.assertIn("RayNeo path", review["reason"])
+        self.assertIn("use tools now", review["reason"])
         recorded = record_blocker_scope_review(
             state,
             review=review,
@@ -256,20 +257,132 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         )
         recovery = recorded["recovery"]
         self.assertEqual(recovery["blocker_scope_review"]["goal_module_count"], 4)
+        self.assertEqual(recovery["blocker_scope_review"]["status"], "CONTINUE_INDEPENDENT_PATH")
         self.assertNotIn("Wi-Fi", json.dumps(recovery, ensure_ascii=False))
 
-    def test_external_prerequisite_scope_check_never_loops(self) -> None:
+    def test_external_prerequisite_retries_one_planning_only_follow_up_then_stops(self) -> None:
         state = empty_state()
         state["goal_stack"]["l0_final_goal"] = "Deliver the verified product."
         state["goal_stack"]["l1_success_criteria"] = [{"criterion": "The product regression passes."}]
 
-        review = external_prerequisite_stop_review(
+        initial = external_prerequisite_stop_review(
+            state,
+            "Waiting for the user to connect the physical device before continuing.",
+        )
+        self.assertTrue(initial["should_continue"])
+        state = record_blocker_scope_review(
+            state,
+            review=initial,
+            observed_at="2026-08-12T00:00:00+00:00",
+        )
+
+        retry = external_prerequisite_stop_review(
             state,
             "Waiting for the user to connect the physical device before continuing.",
             stop_hook_active=True,
         )
+        self.assertTrue(retry["should_continue"])
+        self.assertEqual(retry["status"], "EXECUTION_RETRY_REQUIRED")
+        state = record_blocker_scope_review(
+            state,
+            review=retry,
+            observed_at="2026-08-12T00:01:00+00:00",
+        )
+
+        exhausted = external_prerequisite_stop_review(
+            state,
+            "Waiting for the user to connect the physical device before continuing.",
+            stop_hook_active=True,
+        )
+        self.assertFalse(exhausted["should_continue"])
+        self.assertEqual(exhausted["status"], "NO_PROGRESS_RETRY_EXHAUSTED")
+
+    def test_productive_external_blocker_follow_up_renews_continuation(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["l0_final_goal"] = "Deliver the verified product."
+        state["goal_stack"]["goal_contract"] = {
+            "modules": [
+                {"node_id": "N1", "name": "Device path", "dependencies": []},
+                {"node_id": "N2", "name": "Offline contract tests", "dependencies": []},
+            ],
+            "module_count_total": 2,
+            "final_acceptance": [],
+        }
+        state["segments"]["active"] = {"N1": {"node_id": "N1", "status": "ACTIVE"}}
+        initial = external_prerequisite_stop_review(
+            state,
+            "已进入安全暂停，等待你连接物理设备后才能继续。",
+        )
+        self.assertEqual([row["node_id"] for row in initial["candidate_paths"]], ["N2"])
+        state = record_blocker_scope_review(
+            state,
+            review=initial,
+            observed_at="2026-08-12T00:00:00+00:00",
+        )
+        state["activity"]["writes"] = 1
+
+        renewed = external_prerequisite_stop_review(
+            state,
+            "设备仍需人工连接，我需要暂停执行。",
+            stop_hook_active=True,
+        )
+
+        self.assertTrue(renewed["should_continue"])
+        self.assertEqual(renewed["status"], "CONTINUE_INDEPENDENT_PATH")
+        self.assertIn("N2 Offline contract tests", renewed["reason"])
+
+    def test_external_blocker_with_no_independent_path_can_stop(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["l0_final_goal"] = "Deliver the verified device product."
+        state["goal_stack"]["goal_contract"] = {
+            "modules": [
+                {"node_id": "N1", "name": "Physical device session", "dependencies": []},
+                {"node_id": "N2", "name": "Device acceptance", "dependencies": ["N1"]},
+            ],
+            "module_count_total": 2,
+            "final_acceptance": [],
+        }
+        state["segments"]["active"] = {"N1": {"node_id": "N1", "status": "ACTIVE"}}
+
+        review = external_prerequisite_stop_review(
+            state,
+            "等待你连接物理设备后才能继续。",
+        )
 
         self.assertFalse(review["should_continue"])
+        self.assertEqual(review["status"], "NO_DEPENDENCY_READY_INDEPENDENT_PATH")
+
+    def test_false_global_blocker_claim_cannot_hide_ready_path(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["l0_final_goal"] = "Deliver the verified product."
+        state["goal_stack"]["goal_contract"] = {
+            "modules": [
+                {"node_id": "N1", "name": "Physical device path", "dependencies": []},
+                {"node_id": "N2", "name": "Offline contract tests", "dependencies": []},
+            ],
+            "module_count_total": 2,
+            "final_acceptance": [],
+        }
+        state["segments"]["active"] = {"N1": {"node_id": "N1", "status": "ACTIVE"}}
+        initial = external_prerequisite_stop_review(
+            state,
+            "等待你连接物理设备后才能继续。",
+        )
+        state = record_blocker_scope_review(
+            state,
+            review=initial,
+            observed_at="2026-08-12T00:00:00+00:00",
+        )
+
+        review = external_prerequisite_stop_review(
+            state,
+            "所有剩余路径都依赖物理设备，所以暂停执行。",
+            stop_hook_active=True,
+        )
+
+        self.assertTrue(review["should_continue"])
+        self.assertEqual(review["status"], "EXECUTION_RETRY_REQUIRED")
+        self.assertIn("N2 Offline contract tests", review["reason"])
 
     def test_external_prerequisite_does_not_claim_goal_review_without_goal_structure(self) -> None:
         state = empty_state()
