@@ -15,12 +15,16 @@ except ImportError:
 
 from goal_compass_runtime.convergence import (
     apply_observation,
+    auto_start_segment,
     empty_state,
     external_prerequisite_stop_review,
     judge_trigger,
     record_blocker_scope_review,
     record_collaboration_round,
     record_iteration,
+    start_segment,
+    complete_segment,
+    due_segment_reminder,
 )
 from goal_compass_runtime.llm_judge import invoke
 
@@ -45,6 +49,91 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         self.assertTrue((self.root / ".agent/runtime/convergence_state.json").is_file())
         schema = self.read_json(".agent/protocols/llm_judge.schema.json")
         self.assertIn("CONFIRM_TARGETED_RAIL", schema["properties"]["verdict"]["enum"])
+
+    def test_segment_start_creates_real_deadline_and_short_segment_waits_until_deadline(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["goal_contract"]["modules"] = [{
+            "node_id": "N1",
+            "name": "Watch data bridge",
+            "objective": "Read Watch data through the accepted bridge.",
+            "dependencies": [],
+            "timebox_hours": 2,
+            "reminder_interval_hours": 0,
+        }]
+        state, started = start_segment(state, node_id="N1", observed_at="2026-08-14T00:00:00+00:00")
+
+        self.assertEqual(started["deadline_at"], "2026-08-14T02:00:00+00:00")
+        state, early = due_segment_reminder(state, observed_at="2026-08-14T01:59:59+00:00")
+        self.assertIsNone(early)
+        state, due = due_segment_reminder(state, observed_at="2026-08-14T02:00:00+00:00", consume=True)
+        self.assertEqual(due["status"], "OVERDUE")
+
+        state, completed = complete_segment(
+            state,
+            node_id="N1",
+            observed_at="2026-08-14T02:05:00+00:00",
+            evidence_ids=["watch-bridge-test"],
+        )
+        self.assertEqual(completed["status"], "COMPLETED")
+        self.assertEqual(state["segments"]["active"], {})
+        _, later = due_segment_reminder(state, observed_at="2026-08-15T00:00:00+00:00")
+        self.assertIsNone(later)
+
+    def test_long_segment_uses_goal_selected_reminder_cadence(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["goal_contract"]["modules"] = [{
+            "node_id": "UI",
+            "name": "Mobile UI",
+            "objective": "Complete the accepted mobile UI flow.",
+            "dependencies": [],
+            "timebox_hours": 5,
+            "reminder_interval_hours": 2,
+        }]
+        state, _ = start_segment(state, node_id="UI", observed_at="2026-08-14T00:00:00+00:00")
+        _, early = due_segment_reminder(state, observed_at="2026-08-14T01:59:59+00:00")
+        self.assertIsNone(early)
+        state, due = due_segment_reminder(state, observed_at="2026-08-14T02:00:00+00:00", consume=True)
+        self.assertEqual(due["status"], "TIMEBOX_CHECKPOINT")
+        self.assertEqual(state["segments"]["active"]["UI"]["next_reminder_at"], "2026-08-14T04:00:00+00:00")
+        state, due = due_segment_reminder(state, observed_at="2026-08-14T04:00:00+00:00", consume=True)
+        self.assertEqual(due["status"], "TIMEBOX_CHECKPOINT")
+        self.assertEqual(state["segments"]["active"]["UI"]["next_reminder_at"], "2026-08-14T05:00:00+00:00")
+        _, deadline = due_segment_reminder(state, observed_at="2026-08-14T05:00:00+00:00")
+        self.assertEqual(deadline["status"], "OVERDUE")
+
+    def test_background_start_requires_one_unambiguous_segment(self) -> None:
+        state = empty_state()
+        state["goal_stack"]["goal_contract"]["modules"] = [
+            {
+                "node_id": "UI",
+                "name": "Mobile UI",
+                "dependencies": [],
+                "timebox_hours": 5,
+                "reminder_interval_hours": 2,
+            },
+            {
+                "node_id": "WATCH",
+                "name": "Watch data bridge",
+                "dependencies": [],
+                "timebox_hours": 2,
+                "reminder_interval_hours": 0,
+            },
+        ]
+        state, ambiguous = auto_start_segment(
+            state,
+            observed_at="2026-08-14T00:00:00+00:00",
+            hints=["Implement the next feature."],
+        )
+        self.assertIsNone(ambiguous)
+        self.assertEqual(state["segments"]["active"], {})
+
+        state, started = auto_start_segment(
+            state,
+            observed_at="2026-08-14T00:00:00+00:00",
+            hints=["Begin the Watch data bridge implementation."],
+        )
+        self.assertEqual(started["node_id"], "WATCH")
+        self.assertEqual(started["started_by"], "BACKGROUND_HIGH_CONFIDENCE")
 
     def test_init_projects_an_existing_confirmed_north_star(self) -> None:
         north = self.read_json(".agent/north_star_goal.json")

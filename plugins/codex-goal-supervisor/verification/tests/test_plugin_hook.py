@@ -552,6 +552,108 @@ class PluginHookTests(unittest.TestCase):
         self.assertEqual(observer["pre_events"], 1)
         self.assertIn("src/small_fix.py", observer["changed_path_candidates"])
 
+    def test_expired_project_reuse_probe_reminds_once_only_for_detailed_goal(self) -> None:
+        north_path = self.repo / ".agent/north_star_goal.json"
+        north = json.loads(north_path.read_text(encoding="utf-8"))
+        north.update({
+            "confirmed": True,
+            "goal": "Build a traceable packaging release workflow.",
+            "goal_definition": {"quality": "STRUCTURED_DETAILED"},
+        })
+        north_path.write_text(json.dumps(north), encoding="utf-8")
+        reuse_path = self.repo / ".agent/runtime/reuse_probe.json"
+        reuse_path.write_text(json.dumps({
+            "last_probe": {
+                "status": "NO_CANDIDATES",
+                "checked_at": "2000-01-01T00:00:00+00:00",
+                "expires_at": "2000-01-02T00:00:00+00:00",
+            }
+        }), encoding="utf-8")
+        event = {
+            "cwd": str(self.repo),
+            "hook_event_name": "PreToolUse",
+            "tool_name": "apply_patch",
+            "tool_input": {"patch": "*** Begin Patch\n*** Add File: src/feature.py\n+x = 1\n*** End Patch"},
+        }
+
+        first = self.hook(event)
+        second = self.hook(event)
+
+        self.assertIn("24-hour reuse refresh", first)
+        self.assertEqual(second, "")
+
+    def test_due_segment_reminder_is_injected_on_next_session_event(self) -> None:
+        state_path = self.repo / ".agent/runtime/convergence_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["segments"] = {
+            "active": {
+                "UI": {
+                    "node_id": "UI",
+                    "name": "Mobile UI",
+                    "objective": "Complete the accepted mobile UI flow.",
+                    "status": "ACTIVE",
+                    "started_at": "2000-01-01T00:00:00+00:00",
+                    "deadline_at": "2000-01-01T05:00:00+00:00",
+                    "timebox_hours": 5,
+                    "reminder_interval_hours": 2,
+                    "next_reminder_at": "2000-01-01T02:00:00+00:00",
+                    "reminder_count": 0,
+                }
+            },
+            "completed": [],
+            "last_reminder": None,
+        }
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        event = {
+            "cwd": str(self.repo),
+            "hook_event_name": "SessionStart",
+            "session_id": "deadline-session",
+        }
+
+        output = self.hook(event)
+
+        self.assertIn("Goal segment checkpoint", output)
+        self.assertIn("Mobile UI", output)
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["segments"]["active"]["UI"]["reminder_count"], 1)
+
+    def test_first_unambiguous_product_write_starts_segment_silently(self) -> None:
+        north_path = self.repo / ".agent/north_star_goal.json"
+        north = json.loads(north_path.read_text(encoding="utf-8"))
+        north.update({
+            "confirmed": True,
+            "goal": "Deliver the accepted mobile UI flow.",
+            "goal_definition": {
+                "quality": "STRUCTURED_DETAILED",
+                "process": {"nodes": [{
+                    "node_id": "UI",
+                    "name": "Mobile UI",
+                    "objective": "Complete the accepted mobile UI flow.",
+                    "dependencies": [],
+                    "inputs": ["UI brief"],
+                    "outputs": ["Working UI"],
+                    "exit_criteria": ["UI validation passes"],
+                    "execution_mode": "SERIAL",
+                    "contribution_to_goal": "Provides the user-visible product flow.",
+                    "timebox_hours": 5,
+                    "reminder_interval_hours": 2,
+                }]},
+            },
+        })
+        north_path.write_text(json.dumps(north), encoding="utf-8")
+
+        output = self.hook({
+            "cwd": str(self.repo),
+            "hook_event_name": "PreToolUse",
+            "tool_name": "apply_patch",
+            "tool_input": {"patch": "*** Begin Patch\n*** Add File: src/mobile_ui.py\n+x = 1\n*** End Patch"},
+        })
+
+        self.assertEqual(output, "")
+        state = json.loads((self.repo / ".agent/runtime/convergence_state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["segments"]["active"]["UI"]["started_by"], "BACKGROUND_HIGH_CONFIDENCE")
+        self.assertTrue(state["segments"]["active"]["UI"]["deadline_at"])
+
     def test_stop_warns_when_completion_claim_follows_unverified_product_write(self) -> None:
         self.hook({
             "cwd": str(self.repo),

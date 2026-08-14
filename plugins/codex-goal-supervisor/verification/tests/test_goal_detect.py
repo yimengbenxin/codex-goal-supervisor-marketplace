@@ -45,6 +45,8 @@ def detailed_goal_definition() -> dict:
                     "dependencies": [],
                     "execution_mode": "SERIAL",
                     "contribution_to_goal": "Creates the traceable evidence foundation required by every downstream release decision.",
+                    "timebox_hours": 2,
+                    "reminder_interval_hours": 0,
                 },
                 {
                     "node_id": "N2",
@@ -57,6 +59,8 @@ def detailed_goal_definition() -> dict:
                     "dependencies": ["N1"],
                     "execution_mode": "SERIAL",
                     "contribution_to_goal": "Turns validated evidence into the reproducible release outcome promised by the product goal.",
+                    "timebox_hours": 5,
+                    "reminder_interval_hours": 2,
                 },
             ],
             "completion_conditions": ["The release result and evidence trail are available to downstream users"],
@@ -81,6 +85,15 @@ def detailed_goal_definition() -> dict:
         "non_goals": ["Enterprise compliance platform", "Generic workflow marketplace"],
         "assumptions": ["Test measurements can be exported in a machine-readable form"],
         "open_questions": [],
+        "planning_research": {
+            "completed": True,
+            "researched_at": "2026-08-14T00:00:00Z",
+            "tool_sources_reviewed": 3,
+            "article_sources_reviewed": 2,
+            "refresh_interval_hours": 24,
+            "reusable_candidate_found": False,
+            "no_suitable_reuse_reason": "Reviewed tools do not satisfy the packaging evidence contract and deterministic local validation boundary.",
+        },
     }
 
 
@@ -138,14 +151,7 @@ def super_complex_plan_text() -> str:
 
 def super_complex_goal_definition(plan_ref: str, *, confirmed: bool = True) -> dict:
     definition = detailed_goal_definition()
-    standard = GOAL_COMPASS.goal_definition_from_payload(definition["precise_goal"], definition)
     definition["complexity_level"] = "SUPER_COMPLEX"
-    definition["goal_mode_summary"] = (
-        GOAL_COMPASS.render_goal_mode_objective(standard)
-        + "\n\n并串行摘要：M1 与 M2 串行冻结需求和接口；M3、M4、M5 在共享合同稳定后可并行，"
-        "M6 串行汇总验收。并行模块只通过已确认依赖交换产出，对总目标的贡献分别由核心价值、"
-        "可追踪状态和用户工作流证明。"
-    )
     definition["execution_plan_ref"] = plan_ref
     consultation = {
         "asked_in_conversation": confirmed,
@@ -157,10 +163,26 @@ def super_complex_goal_definition(plan_ref: str, *, confirmed: bool = True) -> d
         "researched_at": "2026-08-04T00:00:00Z",
         "tool_sources_reviewed": 3,
         "article_sources_reviewed": 2,
+        "refresh_interval_hours": 24,
         "reusable_candidate_found": True,
         "reusable_candidate_name": "ExistingTool",
         "user_consultation": consultation,
+        "reuse_decisions": [{
+            "module": "Evidence intake",
+            "candidate": "ExistingTool",
+            "decision": "ADAPT",
+            "planned_use": "Reuse its parser behind the local evidence contract.",
+            "reason": "The parser is useful but its result schema needs a bounded adapter.",
+            "license": "MIT, commercial use confirmed",
+            "validation": "Run the focused evidence-intake contract test.",
+        }],
     }
+    summary_source = dict(definition)
+    summary_source["complexity_level"] = "STANDARD"
+    summary_source["goal_mode_summary"] = None
+    summary_source["execution_plan_ref"] = None
+    standard = GOAL_COMPASS.goal_definition_from_payload(definition["precise_goal"], summary_source)
+    definition["goal_mode_summary"] = GOAL_COMPASS.render_goal_mode_objective(standard) + "\n并行：无。"
     return definition
 
 
@@ -319,12 +341,52 @@ class GoalDetectTests(GoalCompassRepoCase):
         self.assertIn("2. 大板块、具体动作与节点签收", objective)
         self.assertIn("具体动作：validate identifiers", objective)
         self.assertIn("签收标准：every rule has a deterministic result", objective)
+        self.assertIn("小时目标：从实际启动起 5 小时内完成", objective)
+        self.assertIn("每 2 小时检查一次", objective)
         self.assertIn("3. 模块间联调与接口检验", objective)
         self.assertIn("4. 最终成品交付前的全链路检验", objective)
         self.assertIn("5. 最终成品交付", objective)
+        self.assertIn("7. 开源复用与不重复造轮子", objective)
+        self.assertIn("连续运行每满 24 小时", objective)
         self.assertLess(objective.index("最终成品交付前的全链路检验"), objective.index("5. 最终成品交付"))
         self.assertGreaterEqual(len(objective), 2000)
         self.assertLessEqual(len(objective), 3500)
+
+    def test_detailed_goal_requires_research_and_hour_level_segments(self) -> None:
+        definition = detailed_goal_definition()
+        definition.pop("planning_research")
+        definition["process"]["nodes"][0].pop("timebox_hours")
+        path = self.root / "goal-definition.json"
+        path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        result = self.json_run(
+            "goal-set",
+            "--text", definition["precise_goal"],
+            "--definition-file", "goal-definition.json",
+            "--require-detailed",
+            check=False,
+        )
+
+        self.assertEqual(result["status"], "GOAL_DEFINITION_INCOMPLETE")
+        self.assertIn("planning_research.completed", result["missing_fields"])
+        self.assertIn("planning_research.refresh_interval_hours=24", result["missing_fields"])
+        self.assertIn("process.nodes[0].timebox_hours>0", result["missing_fields"])
+
+    def test_long_segment_requires_bounded_reminder_cadence(self) -> None:
+        definition = detailed_goal_definition()
+        definition["process"]["nodes"][1]["reminder_interval_hours"] = 0
+        path = self.root / "goal-definition.json"
+        path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        result = self.json_run(
+            "goal-set",
+            "--text", definition["precise_goal"],
+            "--definition-file", "goal-definition.json",
+            "--require-detailed",
+            check=False,
+        )
+
+        self.assertIn("process.nodes[1].reminder_interval_hours", result["missing_fields"])
 
     def test_north_star_sentence_is_separate_from_detailed_goal_mode_contract(self) -> None:
         definition = detailed_goal_definition()

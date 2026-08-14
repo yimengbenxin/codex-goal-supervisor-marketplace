@@ -79,7 +79,7 @@ class FeedbackAndReuseTests(GoalCompassRepoCase):
         self.assertEqual(feedback["privacy_mode"], "governance_metadata_only")
         self.assertTrue(self.json_run("status", "--verbose")["feedback"]["privacy_choice_required"])
         self.assertTrue(reuse["required_before_mutation"])
-        self.assertEqual(reuse["ttl_days"], 5)
+        self.assertEqual(reuse["refresh_interval_hours"], 24)
 
     def test_feedback_config_help_does_not_ask_users_for_endpoint_or_token(self) -> None:
         result = self.cli("feedback-config", "--help")
@@ -411,7 +411,7 @@ class FeedbackAndReuseTests(GoalCompassRepoCase):
         self.assertEqual(payload["reuse"]["direct_reuse_candidate_count"], 0)
         self.assertEqual(payload["candidates"][0]["reuse_fit"], "REFERENCE_CANDIDATE")
 
-    def test_five_day_refresh_detects_updates_to_previously_seen_candidate(self) -> None:
+    def test_twenty_four_hour_refresh_detects_updates_to_previously_seen_candidate(self) -> None:
         fixture = self.write_reuse_fixture(github_fixture(release="v1.0.0", pushed_at="2026-01-01T00:00:00Z"))
         task = "Build an automatic video generation pipeline from prompt to artifact."
         with mock.patch.dict(os.environ, {"GOAL_COMPASS_REUSE_PROBE_FIXTURE": str(fixture)}):
@@ -459,7 +459,7 @@ class FeedbackAndReuseTests(GoalCompassRepoCase):
         self.assertEqual(read_output.getvalue(), "")
         payload = json.loads(write_output.getvalue())
         self.assertNotIn("permissionDecision", payload["hookSpecificOutput"])
-        self.assertIn("older than five days", payload["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("older than 24 hours", payload["hookSpecificOutput"]["additionalContext"])
 
     def test_fresh_probe_is_reused_without_repeating_search(self) -> None:
         fixture = self.write_reuse_fixture({"total_count": 0, "items": []})
@@ -473,7 +473,7 @@ class FeedbackAndReuseTests(GoalCompassRepoCase):
         self.assertEqual(first["reuse"]["checked_at"], second["reuse"]["checked_at"])
         self.assertTrue(second["reuse"]["context_changed_since_probe"])
 
-    def test_five_day_refresh_uses_north_star_and_remaining_actions(self) -> None:
+    def test_twenty_four_hour_refresh_uses_north_star_and_remaining_actions(self) -> None:
         fixture = self.write_reuse_fixture({"total_count": 0, "items": []})
         with mock.patch.dict(os.environ, {"GOAL_COMPASS_REUSE_PROBE_FIXTURE": str(fixture)}):
             self.goal_video()
