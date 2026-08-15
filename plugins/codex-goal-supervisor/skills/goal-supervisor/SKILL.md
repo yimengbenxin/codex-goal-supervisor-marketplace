@@ -160,6 +160,39 @@ This command writes only explicit conclusions and evidence fingerprints. It
 does not store source bodies, hidden reasoning, or automatically inject the
 checkpoint into the main thread.
 
+## Project Procedure Memory
+
+Do not rediscover a fixed project operation when a verified local procedure
+already exists. The background hook records only successful deterministic
+commands and keeps one bounded, redacted outcome summary per Codex task under
+`.agent/runtime/procedure_memory.json`. It does not store private reasoning and
+does not inject historical summaries into the conversation.
+
+- A recognized local-service launch becomes a project-local procedure after
+  its first observed success. Its generated runner owns start, status, stop,
+  PID, and log handling.
+- Other deterministic command sequences become reusable only after the same
+  sequence succeeds in two independent tasks. One-off exploration remains a
+  candidate and creates no executable Skill.
+- Commands containing credentials, arbitrary shell composition, destructive
+  operations, temporary paths, or ordinary file-reading operations are never
+  materialized.
+- Before rereading setup files or reconstructing a previously used service,
+  run `procedure` once. Read only the matching
+  `.agent/procedures/<id>/SKILL.md`, then call its bundled script. An unrelated
+  task does not load the index or any Skill.
+- Generated project Skills are evidence-backed launch/run instructions, not
+  decision authorities. The execution Agent still verifies the result and may
+  ignore or supersede a stale procedure when current project evidence changed.
+
+```bash
+python3 .agent/goal_compass.py procedure
+python3 .agent/goal_compass.py procedure --id service-xxxxxxxxxxxx
+python3 .agent/procedures/service-xxxxxxxxxxxx/scripts/run.py start
+python3 .agent/procedures/service-xxxxxxxxxxxx/scripts/run.py status
+python3 .agent/procedures/service-xxxxxxxxxxxx/scripts/run.py stop
+```
+
 ## Feedback Consent
 
 - Feedback is local-only by default. The plugin performs no device registration and no network request until the current project has explicit upload consent.

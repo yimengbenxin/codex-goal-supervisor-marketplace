@@ -210,6 +210,7 @@ class InstallTests(MinimalPluginFixtureCase):
         self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "windows_hook.py").exists())
         self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "roadmap.py").exists())
         self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "roadmap.html").exists())
+        self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "procedure_memory.py").exists())
         self.assertTrue((self.repo / ".agent" / "quarantine_manifest.jsonl").exists())
         self.assertTrue((self.repo / ".codex" / "hooks.json").exists())
         self.assertEqual(json.loads((self.repo / ".codex" / "hooks.json").read_text()), {"hooks": {}})
