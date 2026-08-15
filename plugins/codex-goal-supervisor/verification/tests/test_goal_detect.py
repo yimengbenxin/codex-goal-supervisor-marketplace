@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 try:
@@ -405,6 +406,30 @@ class GoalDetectTests(GoalCompassRepoCase):
         self.assertLess(len(north["goal"]), 120)
         self.assertGreaterEqual(len(result["goal_mode_objective"]), 2000)
         self.assertNotEqual(north["goal"], result["goal_mode_objective"])
+
+    def test_goal_set_returns_exact_native_goal_sync_contract(self) -> None:
+        definition = detailed_goal_definition()
+        path = self.root / "goal-definition.json"
+        path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        result = self.json_run(
+            "goal-set",
+            "--text", "Build a traceable packaging release evidence system.",
+            "--definition-file", "goal-definition.json",
+            "--require-detailed",
+        )
+        north = self.read_json(".agent/north_star_goal.json")
+        objective = result["goal_mode_objective"]
+        expected_hash = hashlib.sha256(objective.encode("utf-8")).hexdigest()
+
+        self.assertEqual(result["native_goal_sync"]["status"], "CREATE_REQUIRED")
+        self.assertEqual(result["native_goal_sync"]["objective_source_field"], "goal_mode_objective")
+        self.assertEqual(result["native_goal_sync"]["objective_chars"], len(objective))
+        self.assertEqual(result["native_goal_sync"]["objective_sha256"], expected_hash)
+        self.assertIn("create_goal", result["native_goal_sync"]["required_action"])
+        self.assertIn("get_goal", result["native_goal_sync"]["required_action"])
+        self.assertEqual(north["native_goal_contract"]["objective_sha256"], expected_hash)
+        self.assertEqual(north["native_goal_contract"]["objective_chars"], len(objective))
 
     def test_super_complex_goal_keeps_compressed_contract_and_references_full_plan(self) -> None:
         plan_ref = "docs/PROJECT_EXECUTION_PLAN.md"

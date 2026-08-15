@@ -863,6 +863,15 @@ class ExplicitActivationContractTests(GoalCompassRepoCase):
         text = (PLUGIN_ROOT / "skills/goal-supervisor/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("establishing the project North Star and starting the Codex client Goal mode are mandatory", text)
         self.assertIn("Never claim activation is complete when only one of these two states exists", text)
+        self.assertLess(text.index("goal-set --require-detailed"), text.index("native `create_goal`"))
+        self.assertIn("compare its objective byte-for-byte", text)
+        self.assertIn("`update_goal` changes lifecycle status only", text)
+
+    def test_real_blackbox_contract_requires_exact_native_goal_sync(self) -> None:
+        text = (PLUGIN_ROOT / "skills/goal-supervisor/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Only after it succeeds, call the native `create_goal` tool", text)
+        self.assertIn("byte-for-byte", text)
+        self.assertNotIn("first action must call", text.lower())
 
 
 if __name__ == "__main__":
