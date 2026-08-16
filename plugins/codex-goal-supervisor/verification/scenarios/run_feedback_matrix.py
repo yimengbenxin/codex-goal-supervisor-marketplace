@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -203,7 +204,7 @@ def scenario_negative_semantics(base: Path) -> dict[str, Any]:
     test.parent.mkdir(parents=True)
     css.write_text(".negative { color: #b42318; }\n", encoding="utf-8")
     test.write_text("def test_rejects_bad_lot():\n    assert not False\n", encoding="utf-8")
-    report = project.cli("onboard-scan", check=False)
+    report = project.cli("onboard-scan", "--verbose", check=False)
     items = {row.get("artifact"): row for row in report.get("inventory", [])}
     selected = {path: items.get(path, {}) for path in ["src/quality/status.css", "tests/test_quality.py"]}
     bad = {"NOISE_RISK", "DELETE_CANDIDATE", "QUARANTINE_CANDIDATE"}
@@ -418,6 +419,12 @@ def main() -> int:
     else:
         temporary = tempfile.TemporaryDirectory(prefix="goal-compass-feedback-matrix-")
         base = Path(temporary.name)
+    reuse_fixture = base / "reuse-probe-no-candidates.json"
+    reuse_fixture.write_text(
+        json.dumps({"total_count": 0, "incomplete_results": False, "items": []}),
+        encoding="utf-8",
+    )
+    os.environ["GOAL_COMPASS_REUSE_PROBE_FIXTURE"] = str(reuse_fixture)
     results: list[dict[str, Any]] = []
     try:
         for name, scenario in SCENARIOS:

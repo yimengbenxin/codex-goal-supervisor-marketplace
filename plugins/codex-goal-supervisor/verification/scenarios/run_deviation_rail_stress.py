@@ -2,10 +2,12 @@
 """Run an installed-project stress scenario for the V2 deviation rail."""
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import concurrent.futures
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,26 +20,53 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = PLUGIN_ROOT / "scripts" / "install_governor.py"
 EMPTY_REUSE_FIXTURE = PLUGIN_ROOT / "verification" / "fixtures" / "reuse_probe_empty.json"
 TIMEOUT = 10
+ENABLE_LLM_JUDGE = False
 
 
 def run(cmd: list[str], cwd: Path, *, input_text: str | None = None) -> tuple[subprocess.CompletedProcess[str], float]:
     started = time.perf_counter()
-    result = subprocess.run(
+    env = {
+        **os.environ,
+        "PYTHONUTF8": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "GOAL_COMPASS_REUSE_PROBE_FIXTURE": str(EMPTY_REUSE_FIXTURE),
+    }
+    if not ENABLE_LLM_JUDGE:
+        env["GOAL_SUPERVISOR_DISABLE_LLM_JUDGE"] = "1"
+    popen_kwargs: dict[str, Any] = {
+        "cwd": cwd,
+        "stdin": subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": env,
+    }
+    if os.name != "nt":
+        popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(
         cmd,
-        cwd=cwd,
-        input=input_text,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        timeout=TIMEOUT,
-        env={
-            **os.environ,
-            "PYTHONUTF8": "1",
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "GOAL_COMPASS_REUSE_PROBE_FIXTURE": str(EMPTY_REUSE_FIXTURE),
-        },
+        **popen_kwargs,
     )
+    try:
+        stdout, stderr = proc.communicate(input=input_text, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+                check=False,
+            )
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+        stdout, stderr = proc.communicate(timeout=2)
+        raise RuntimeError(
+            f"command timed out after {TIMEOUT}s: {cmd}\nstdout={stdout}\nstderr={stderr}"
+        ) from exc
+    result = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
     elapsed = time.perf_counter() - started
     if result.returncode != 0:
         raise RuntimeError(f"command failed: {cmd}\nstdout={result.stdout}\nstderr={result.stderr}")
@@ -124,7 +153,21 @@ def backdate_confirmation(repo: Path, identifier: str) -> None:
     save_observer(repo, state)
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--with-llm-judge",
+        action="store_true",
+        help="Opt in to the external LLM Judge. The default stress run is deterministic and offline.",
+    )
+    parser.add_argument("--json-out", help="Also write the final machine report to this path.")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    global ENABLE_LLM_JUDGE
+    args = parse_args(argv)
+    ENABLE_LLM_JUDGE = bool(args.with_llm_judge)
     stages: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="goal-supervisor-v2-rail-") as raw:
         repo = Path(raw) / "product"
@@ -350,9 +393,10 @@ def main() -> int:
         if [row["decision"] for row in active_stage["events"]] != ["WARNING", "WARNING", "DENY"]:
             raise AssertionError(f"full hook parity failed: {active_stage}")
 
-        print(json.dumps({
+        report = {
             "ok": True,
             "plugin_version": json.loads((PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"],
+            "llm_judge_enabled": ENABLE_LLM_JUDGE,
             "stages": stages,
             "max_hook_seconds": max(
                 float(value)
@@ -360,7 +404,11 @@ def main() -> int:
                 for key, value in row.items()
                 if key.endswith("seconds") and isinstance(value, (int, float))
             ),
-        }, ensure_ascii=False, indent=2))
+        }
+        rendered = json.dumps(report, ensure_ascii=False, indent=2)
+        if args.json_out:
+            Path(args.json_out).write_text(rendered + "\n", encoding="utf-8")
+        print(rendered)
     return 0
 
 

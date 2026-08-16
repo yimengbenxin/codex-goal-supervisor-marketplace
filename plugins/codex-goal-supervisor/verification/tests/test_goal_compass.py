@@ -32,6 +32,7 @@ TEST_MODULES = [
     "verification.tests.test_procedure_memory",
     "verification.tests.test_context_continuity",
     "verification.tests.test_goal_return",
+    "verification.tests.test_phased_goal",
     "verification.tests.test_deviation_incidents",
     "verification.tests.test_agency_role_pack",
     "verification.tests.test_cross_domain_benchmark",

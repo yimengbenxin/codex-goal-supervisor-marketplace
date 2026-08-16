@@ -167,6 +167,23 @@ class GoalReturnTests(GoalCompassRepoCase):
         self.assertIsNone(temporary)
         self.assertIsNone(contained)
 
+    def test_mixed_language_explicit_goal_replacement_and_confirmation_are_recognized(self) -> None:
+        north, convergence = self.make_long_goal()
+        replacement = (
+            "将项目长期、持久、正式的 North Star 从包装印刷作业本地校验改为电商市场平台，"
+            "后续路线全部围绕电商市场平台并替代现有包装方向。"
+        )
+        confirmation = (
+            "确认：将项目长期、持久、正式的 North Star 改为电商市场平台，"
+            "并同步重建 North Star 与详细 Goal。"
+        )
+
+        candidate = goal_change_candidate(north, convergence, replacement)
+
+        self.assertIsNotNone(candidate)
+        self.assertTrue(candidate["explicit"])
+        self.assertEqual(goal_change_response(confirmation), "CONFIRMED")
+
     def test_short_goal_never_opens_direction_change_confirmation(self) -> None:
         north = self.north()
         north["goal"] = "Fix one local button label."

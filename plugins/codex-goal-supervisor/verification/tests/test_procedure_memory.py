@@ -95,6 +95,79 @@ class ProcedureMemoryTests(unittest.TestCase):
         self.assertEqual(verbose.returncode, 0)
         self.assertEqual(json.loads(verbose.stdout)["procedures"]["ready_count"], 1)
 
+    def test_explicit_activation_fallback_records_only_evidenced_local_service(self) -> None:
+        evidence = self.repo / "audit" / "service-smoke.json"
+        evidence.parent.mkdir(parents=True)
+        evidence.write_text('{"status":"PASS"}\n', encoding="utf-8")
+        command = f"{sys.executable} -m http.server 8765 --bind 127.0.0.1"
+
+        recorded = run_goal_compass([
+            "procedure",
+            "--remember-verified-service", command,
+            "--evidence", "audit/service-smoke.json",
+        ], cwd=self.repo)
+
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        payload = json.loads(recorded.stdout)
+        self.assertEqual(payload["status"], "READY")
+        self.assertEqual(payload["capture_mode"], "EXPLICIT_ACTIVATION_FALLBACK")
+        index = json.loads((self.repo / ".agent/procedures/index.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(index["procedures"]), 1)
+        self.assertEqual(index["procedures"][0]["kind"], "LOCAL_SERVICE")
+
+    def test_explicit_activation_fallback_rejects_unevidenced_or_nonservice_commands(self) -> None:
+        no_evidence = run_goal_compass([
+            "procedure",
+            "--remember-verified-service", f"{sys.executable} -m http.server 8765 --bind 127.0.0.1",
+            "--evidence", "audit/missing.json",
+        ], cwd=self.repo)
+        self.assertEqual(no_evidence.returncode, 2)
+        self.assertEqual(json.loads(no_evidence.stdout)["status"], "REFUSED")
+
+        evidence = self.repo / "audit.json"
+        evidence.write_text('{"status":"PASS"}\n', encoding="utf-8")
+        nonservice = run_goal_compass([
+            "procedure",
+            "--remember-verified-service", f"{sys.executable} -m unittest -q",
+            "--evidence", "audit.json",
+        ], cwd=self.repo)
+        self.assertEqual(nonservice.returncode, 2)
+        self.assertEqual(json.loads(nonservice.stdout)["status"], "REFUSED")
+        index = json.loads((self.repo / ".agent/procedures/index.json").read_text(encoding="utf-8"))
+        self.assertEqual(index["procedures"], [])
+
+    def test_generated_runner_uses_project_root_for_relative_service_script(self) -> None:
+        server = self.repo / "src" / "server.py"
+        server.parent.mkdir(parents=True)
+        server.write_text(
+            "from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler\n"
+            "class Handler(BaseHTTPRequestHandler):\n"
+            "    def do_GET(self):\n"
+            "        self.send_response(200); self.end_headers()\n"
+            "    def log_message(self, *args): pass\n"
+            "ThreadingHTTPServer(('127.0.0.1', 8766), Handler).serve_forever()\n",
+            encoding="utf-8",
+        )
+        evidence = self.repo / "audit.json"
+        evidence.write_text('{"status":"PASS"}\n', encoding="utf-8")
+        recorded = run_goal_compass([
+            "procedure",
+            "--remember-verified-service", f"{sys.executable} src/server.py",
+            "--evidence", "audit.json",
+        ], cwd=self.repo)
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        runner = self.repo / json.loads(recorded.stdout)["procedure"]["runner_path"]
+
+        started = run_cmd([sys.executable, str(runner), "start"], cwd=self.repo, timeout=5)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertEqual(json.loads(started.stdout)["status"], "STARTED")
+        status = run_cmd([sys.executable, str(runner), "status"], cwd=self.repo, timeout=5)
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertEqual(json.loads(status.stdout)["status"], "RUNNING")
+        stopped = run_cmd([sys.executable, str(runner), "stop"], cwd=self.repo, timeout=5)
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertEqual(json.loads(stopped.stdout)["status"], "STOPPED")
+
     def test_generic_sequence_requires_two_independent_successful_threads(self) -> None:
         command = f"{sys.executable} -m unittest -q"
         self.successful_command("thread-one", command)

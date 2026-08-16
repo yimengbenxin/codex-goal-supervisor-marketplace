@@ -21,6 +21,29 @@ SPEC.loader.exec_module(PUBLISHER)
 
 
 class ReleasePublishTests(unittest.TestCase):
+    def valid_blackbox_attestation(self) -> dict[str, object]:
+        objective_hash = "a" * 64
+        return {
+            "schema_version": 1,
+            "source_commit": "release-head",
+            "plugin_version_tested": "2.8.2+codex.20260816023131",
+            "thread_id": "01a-test-thread",
+            "thread_title": "插件专用测试线程",
+            "model": "gpt-5.6-luna",
+            "thinking": "max",
+            "project_path": "/tmp/goal-supervisor-blackbox",
+            "plugin_goal_objective_sha256": objective_hash,
+            "native_goal_objective_sha256": objective_hash,
+            "plugin_goal_objective_chars": 3200,
+            "goal_set_before_create_goal": True,
+            "get_goal_verified_exact": True,
+            "online_research_call_count": 2,
+            "product_validation_command": "python3 scripts/smoke_mvp.py",
+            "product_validation_returncode": 0,
+            "product_validation_passed": True,
+            "completed_at": "2026-08-16T02:31:31+08:00",
+        }
+
     def test_release_identity_requires_timestamped_semver(self) -> None:
         self.assertEqual(
             PUBLISHER.release_identity("2.4.5+codex.20260812150000"),
@@ -137,6 +160,43 @@ class ReleasePublishTests(unittest.TestCase):
             with self.assertRaises(PUBLISHER.PublishError):
                 PUBLISHER.publish(dry_run=True)
         compile_source.assert_not_called()
+
+    def test_release_requires_blackbox_attestation_before_verification(self) -> None:
+        with mock.patch.object(PUBLISHER, "BLACKBOX_ATTESTATION", Path("/definitely/missing")):
+            with self.assertRaisesRegex(PUBLISHER.PublishError, "pre-publication real black-box"):
+                PUBLISHER.require_blackbox_attestation(
+                    head="release-head",
+                    version="2.8.2+codex.20260816023131",
+                )
+
+    def test_blackbox_attestation_is_bound_to_release_commit(self) -> None:
+        payload = self.valid_blackbox_attestation()
+        payload["source_commit"] = "older-head"
+        with self.assertRaisesRegex(PUBLISHER.PublishError, "current release commit"):
+            PUBLISHER.validate_blackbox_attestation(
+                payload,
+                head="release-head",
+                version="2.8.2+codex.20260816023131",
+            )
+
+    def test_blackbox_attestation_requires_exact_native_goal(self) -> None:
+        payload = self.valid_blackbox_attestation()
+        payload["native_goal_objective_sha256"] = "b" * 64
+        with self.assertRaisesRegex(PUBLISHER.PublishError, "does not exactly match"):
+            PUBLISHER.validate_blackbox_attestation(
+                payload,
+                head="release-head",
+                version="2.8.2+codex.20260816023131",
+            )
+
+    def test_blackbox_attestation_accepts_real_bound_evidence(self) -> None:
+        result = PUBLISHER.validate_blackbox_attestation(
+            self.valid_blackbox_attestation(),
+            head="release-head",
+            version="2.8.2+codex.20260816023131",
+        )
+        self.assertEqual(result["objective_chars"], 3200)
+        self.assertEqual(result["thread_title"], "插件专用测试线程")
 
     def test_existing_release_requires_exact_asset_digests(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

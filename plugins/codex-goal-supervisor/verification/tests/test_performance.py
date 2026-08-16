@@ -397,3 +397,13 @@ class PerformanceTests(GoalCompassRepoCase):
         elapsed = time.perf_counter() - started
         self.assertEqual(code, 0, stdout.getvalue())
         self.assertLess(elapsed, 20.0)
+
+    def test_deviation_stress_help_is_side_effect_free_and_fast(self) -> None:
+        script = PLUGIN_ROOT / "verification" / "scenarios" / "run_deviation_rail_stress.py"
+        started = time.perf_counter()
+        proc = run_cmd([os.sys.executable, str(script), "--help"], cwd=PLUGIN_ROOT, timeout=2)
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--with-llm-judge", proc.stdout)
+        self.assertLess(elapsed, 2.0)

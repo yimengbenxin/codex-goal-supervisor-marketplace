@@ -12,9 +12,9 @@ import unittest
 from pathlib import Path
 
 try:
-    from .helpers import DEFAULT_TIMEOUT, PLUGIN_ROOT, SCRIPT, copy_goal_compass_runtime, install_product_test_fixtures, run_cmd, run_goal_compass
+    from .helpers import DEFAULT_TIMEOUT, HARNESS_ROOT, PLUGIN_ROOT, SCRIPT, copy_goal_compass_runtime, install_product_test_fixtures, run_cmd, run_goal_compass
 except ImportError:
-    from helpers import DEFAULT_TIMEOUT, PLUGIN_ROOT, SCRIPT, copy_goal_compass_runtime, install_product_test_fixtures, run_cmd, run_goal_compass
+    from helpers import DEFAULT_TIMEOUT, HARNESS_ROOT, PLUGIN_ROOT, SCRIPT, copy_goal_compass_runtime, install_product_test_fixtures, run_cmd, run_goal_compass
 
 
 HOOK = PLUGIN_ROOT / "scripts" / "goal_hook.py"
@@ -54,6 +54,16 @@ class PluginHookTests(unittest.TestCase):
         proc = run_cmd(
             [sys.executable, str(HOOK)],
             cwd=self.parent,
+            timeout=DEFAULT_TIMEOUT,
+            check=True,
+            input_text=json.dumps(event),
+        )
+        return proc.stdout
+
+    def compass_hook(self, event: dict) -> str:
+        proc = run_cmd(
+            [sys.executable, str(self.repo / ".agent" / "goal_compass.py"), "hook"],
+            cwd=self.repo,
             timeout=DEFAULT_TIMEOUT,
             check=True,
             input_text=json.dumps(event),
@@ -125,6 +135,20 @@ class PluginHookTests(unittest.TestCase):
         self.assertEqual(json.loads(stop_output), {})
         state = json.loads((self.repo / ".agent/runtime/goal_return/state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["sessions"]["hook-goal-return"]["interrupts"][-1]["state"], "CLOSED")
+
+    def test_goal_compass_hook_dispatches_user_prompt_submit_to_project_hook(self) -> None:
+        self.cli("goal-set", "--text", "Build a reliable local product.")
+        output = self.compass_hook({
+            "session_id": "compat-goal-return",
+            "turn_id": "turn-1",
+            "cwd": str(self.repo),
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "插一句：这个状态字段是什么意思？",
+        })
+
+        self.assertIn("bounded temporary branch", output)
+        state = json.loads((self.repo / ".agent/runtime/goal_return/state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["sessions"]["compat-goal-return"]["interrupts"][-1]["kind"], "QUESTION_ONLY")
 
     def test_long_term_goal_change_asks_once_only_after_high_confidence_judgment(self) -> None:
         self.cli("goal-set", "--text", "Build a private LAN Agent Registry for reusable internal Agent packages.")
@@ -456,14 +480,14 @@ class PluginHookTests(unittest.TestCase):
 
     def test_plugin_source_template_is_not_selected_as_user_project(self) -> None:
         event = {
-            "cwd": str(PLUGIN_ROOT),
+            "cwd": str(HARNESS_ROOT),
             "hook_event_name": "PreToolUse",
             "tool_name": "apply_patch",
             "tool_input": {"patch": "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch"},
         }
         proc = run_cmd(
             [sys.executable, str(HOOK)],
-            cwd=PLUGIN_ROOT,
+            cwd=HARNESS_ROOT,
             timeout=DEFAULT_TIMEOUT,
             check=True,
             input_text=json.dumps(event),

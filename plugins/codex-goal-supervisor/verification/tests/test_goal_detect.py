@@ -833,3 +833,23 @@ class GoalDetectTests(GoalCompassRepoCase):
         result = self.json_run("goal-detect")
 
         self.assertEqual(result["project_detected_goal"], "Unknown project goal.")
+
+    def test_goal_detect_unknown_does_not_mismatch_confirmed_north_star(self) -> None:
+        self.cli(
+            "goal-set",
+            "--text",
+            "Deliver a deterministic packaging artwork release station with reproducible evidence.",
+        )
+        (self.root / "README.md").write_text(
+            "Packaging artwork release station with deterministic print evidence.\n",
+            encoding="utf-8",
+        )
+
+        result = self.json_run("goal-detect")
+
+        self.assertEqual(result["project_detected_goal"], "Unknown project goal.")
+        self.assertEqual(result["alignment_status"], "UNKNOWN")
+        self.assertEqual(result["status"], "NEEDS_PROJECT_EVIDENCE")
+        self.assertEqual(result["required_action"], "add_project_goal_evidence")
+        self.assertFalse(result["requires_user_confirmation"])
+        self.assertEqual(result["contradictions"], [])

@@ -22,6 +22,7 @@ from typing import Any, Sequence
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
 BUILDER = PLUGIN_ROOT / "scripts" / "build_plugin_release.py"
+BLACKBOX_ATTESTATION = PLUGIN_ROOT / ".git" / "goal-supervisor-blackbox-attestation.json"
 CANONICAL_REPOSITORY = "yimengbenxin/codex-goal-supervisor"
 CANONICAL_REMOTE = "https://github.com/yimengbenxin/codex-goal-supervisor.git"
 MARKETPLACES = {
@@ -187,7 +188,81 @@ def tag_resolves_to_head(output: str, head: str) -> bool:
     return head in hashes
 
 
-def require_release_source() -> dict[str, str]:
+def validate_blackbox_attestation(payload: dict[str, Any], *, head: str, version: str) -> dict[str, Any]:
+    """Require real pre-publication evidence bound to this exact release commit."""
+    required = {
+        "schema_version",
+        "source_commit",
+        "plugin_version_tested",
+        "thread_id",
+        "thread_title",
+        "model",
+        "thinking",
+        "project_path",
+        "plugin_goal_objective_sha256",
+        "native_goal_objective_sha256",
+        "plugin_goal_objective_chars",
+        "goal_set_before_create_goal",
+        "get_goal_verified_exact",
+        "online_research_call_count",
+        "product_validation_command",
+        "product_validation_returncode",
+        "product_validation_passed",
+        "completed_at",
+    }
+    missing = sorted(required - payload.keys())
+    if missing:
+        raise PublishError(f"Black-box attestation is missing: {', '.join(missing)}")
+    if payload["schema_version"] != 1:
+        raise PublishError("Unsupported black-box attestation schema.")
+    if payload["source_commit"] != head:
+        raise PublishError("Black-box evidence is not bound to the current release commit.")
+    if payload["plugin_version_tested"] != version:
+        raise PublishError("Black-box evidence tested a different plugin version.")
+    plugin_hash = str(payload["plugin_goal_objective_sha256"])
+    native_hash = str(payload["native_goal_objective_sha256"])
+    if not re.fullmatch(r"[0-9a-f]{64}", plugin_hash) or plugin_hash != native_hash:
+        raise PublishError("Native Goal objective does not exactly match the plugin Goal contract.")
+    objective_chars = payload["plugin_goal_objective_chars"]
+    if not isinstance(objective_chars, int) or not 2000 <= objective_chars <= 3500:
+        raise PublishError("Black-box Goal objective length is outside the supported detailed range.")
+    if payload["goal_set_before_create_goal"] is not True:
+        raise PublishError("Black-box run created the native Goal before finalizing the detailed Goal contract.")
+    if payload["get_goal_verified_exact"] is not True:
+        raise PublishError("Black-box run did not read back and exactly verify the native Goal.")
+    if not isinstance(payload["online_research_call_count"], int) or payload["online_research_call_count"] < 1:
+        raise PublishError("Black-box run has no real online reuse research evidence.")
+    if payload["product_validation_passed"] is not True or payload["product_validation_returncode"] != 0:
+        raise PublishError("Black-box product validation did not pass.")
+    if not str(payload["thread_id"]).strip() or not str(payload["project_path"]).startswith("/"):
+        raise PublishError("Black-box task identity or project path is invalid.")
+    if "luna" not in str(payload["model"]).lower() or str(payload["thinking"]).lower() != "max":
+        raise PublishError("Release black-box must run in the real Luna Max test task.")
+    return {
+        "thread_id": str(payload["thread_id"]),
+        "thread_title": str(payload["thread_title"]),
+        "model": str(payload["model"]),
+        "thinking": str(payload["thinking"]),
+        "project_path": str(payload["project_path"]),
+        "objective_sha256": plugin_hash,
+        "objective_chars": objective_chars,
+        "online_research_call_count": payload["online_research_call_count"],
+        "product_validation_command": str(payload["product_validation_command"]),
+        "completed_at": str(payload["completed_at"]),
+    }
+
+
+def require_blackbox_attestation(*, head: str, version: str) -> dict[str, Any]:
+    if not BLACKBOX_ATTESTATION.is_file():
+        raise PublishError(
+            "Missing pre-publication real black-box evidence at "
+            f"{BLACKBOX_ATTESTATION}. Run the plugin-specific Luna Max test before publishing."
+        )
+    payload = json.loads(BLACKBOX_ATTESTATION.read_text(encoding="utf-8"))
+    return validate_blackbox_attestation(payload, head=head, version=version)
+
+
+def require_release_source() -> dict[str, Any]:
     data = manifest()
     version = str(data.get("version") or "")
     release, build, tag = release_identity(version)
@@ -205,7 +280,17 @@ def require_release_source() -> dict[str, str]:
     notes = PLUGIN_ROOT / "docs" / f"RELEASE_NOTES_{release}.md"
     if not notes.is_file():
         raise PublishError(f"Missing release notes: {notes.relative_to(PLUGIN_ROOT)}")
-    return {"version": version, "release": release, "build": build, "tag": tag, "notes": str(notes)}
+    head = run_command(["git", "rev-parse", "HEAD"]).stdout.strip()
+    blackbox = require_blackbox_attestation(head=head, version=version)
+    return {
+        "version": version,
+        "release": release,
+        "build": build,
+        "tag": tag,
+        "notes": str(notes),
+        "source_commit": head,
+        "blackbox_verification": blackbox,
+    }
 
 
 def compile_source() -> None:

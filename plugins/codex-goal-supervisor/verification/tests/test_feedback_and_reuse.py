@@ -411,6 +411,47 @@ class FeedbackAndReuseTests(GoalCompassRepoCase):
         self.assertEqual(payload["reuse"]["direct_reuse_candidate_count"], 0)
         self.assertEqual(payload["candidates"][0]["reuse_fit"], "REFERENCE_CANDIDATE")
 
+    def test_substring_and_generic_terms_do_not_create_blocking_reuse_candidate(self) -> None:
+        fixture = self.write_reuse_fixture({
+            "total_count": 2,
+            "incomplete_results": False,
+            "items": [
+                {
+                    "full_name": "example/language-maintenance-state",
+                    "html_url": "https://github.com/example/language-maintenance-state",
+                    "description": "Maintain a large reliable state registry.",
+                    "stargazers_count": 900,
+                    "language": "Python",
+                    "license": {"spdx_id": "MIT"},
+                    "archived": False,
+                    "topics": ["maintenance", "workflow"],
+                },
+                {
+                    "full_name": "example/easy-video-uploader",
+                    "html_url": "https://github.com/example/easy-video-uploader",
+                    "description": "Generate and upload scheduled video posts.",
+                    "stargazers_count": 900,
+                    "language": "Python",
+                    "license": {"spdx_id": "MIT"},
+                    "archived": False,
+                    "topics": ["video", "upload"],
+                },
+            ],
+        })
+        with mock.patch.dict(os.environ, {"GOAL_COMPASS_REUSE_PROBE_FIXTURE": str(fixture)}):
+            registry = self.json_run(
+                "reuse-check",
+                "--task", "Build a LAN registry and maintain a large state file.",
+            )
+            video = self.json_run(
+                "reuse-check",
+                "--task", "Generate a publishable video artifact with quality evidence.",
+                "--force",
+            )
+
+        self.assertEqual(registry["reuse"]["direct_reuse_candidate_count"], 0)
+        self.assertEqual(video["reuse"]["direct_reuse_candidate_count"], 0)
+
     def test_twenty_four_hour_refresh_detects_updates_to_previously_seen_candidate(self) -> None:
         fixture = self.write_reuse_fixture(github_fixture(release="v1.0.0", pushed_at="2026-01-01T00:00:00Z"))
         task = "Build an automatic video generation pipeline from prompt to artifact."

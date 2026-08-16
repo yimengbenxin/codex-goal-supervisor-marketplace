@@ -93,6 +93,26 @@ class OnboardScanTests(GoalCompassRepoCase):
         proc = self.cli("prune-apply", "--confirm", "--delete", check=False)
         self.assertNotEqual(proc.returncode, 0)
 
+    def test_onboard_scan_unknown_does_not_force_mismatch_with_confirmed_north_star(self) -> None:
+        self.cli(
+            "goal-set",
+            "--text",
+            "Deliver a deterministic packaging artwork release station with reproducible evidence.",
+        )
+        (self.root / "README.md").write_text(
+            "Packaging artwork release station with deterministic print evidence.\n",
+            encoding="utf-8",
+        )
+
+        scan = self.json_run("onboard-scan", check=False)
+
+        self.assertEqual(scan["detected_project_goal"], "Unknown project goal.")
+        self.assertEqual(scan["alignment_status"], "UNKNOWN")
+        self.assertEqual(scan["status"], "NEEDS_PROJECT_EVIDENCE")
+        self.assertEqual(scan["required_action"], "add_project_goal_evidence")
+        self.assertFalse(scan["requires_user_confirmation"])
+        self.assertEqual(scan["evidence_summary"]["contradicting"], 0)
+
     def test_onboard_scan_defaults_to_summary_and_verbose_keeps_inventory(self) -> None:
         self.goal_video()
 
