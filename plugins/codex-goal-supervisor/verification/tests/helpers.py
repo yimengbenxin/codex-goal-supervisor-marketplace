@@ -29,6 +29,10 @@ os.environ.setdefault("GOAL_COMPASS_REUSE_PROBE_FIXTURE", str(EMPTY_REUSE_FIXTUR
 # Detailed Goal tests validate the route contract in process. They do not start
 # one detached dashboard per fixture; roadmap server tests opt in explicitly.
 os.environ.setdefault("GOAL_SUPERVISOR_DISABLE_ROADMAP_SERVER", "1")
+# The suite imports the product CLI in-process and may inherit the developer's
+# live Codex task id. Native Goal synchronization is covered with an isolated
+# fake app-server; ordinary fixtures must never mutate the task running tests.
+os.environ.setdefault("GOAL_SUPERVISOR_NATIVE_GOAL_BRIDGE", "disabled")
 
 DEFAULT_TIMEOUT = 8
 LONG_TIMEOUT = 20

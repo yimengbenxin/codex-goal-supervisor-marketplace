@@ -202,8 +202,11 @@ def validate_blackbox_attestation(payload: dict[str, Any], *, head: str, version
         "plugin_goal_objective_sha256",
         "native_goal_objective_sha256",
         "plugin_goal_objective_chars",
-        "goal_set_before_create_goal",
-        "get_goal_verified_exact",
+        "native_goal_set_verified",
+        "native_goal_get_verified_exact",
+        "native_goal_operation",
+        "replacement_history_verified",
+        "previous_goal_objective_achieved",
         "online_research_call_count",
         "product_validation_command",
         "product_validation_returncode",
@@ -213,7 +216,7 @@ def validate_blackbox_attestation(payload: dict[str, Any], *, head: str, version
     missing = sorted(required - payload.keys())
     if missing:
         raise PublishError(f"Black-box attestation is missing: {', '.join(missing)}")
-    if payload["schema_version"] != 1:
+    if payload["schema_version"] != 2:
         raise PublishError("Unsupported black-box attestation schema.")
     if payload["source_commit"] != head:
         raise PublishError("Black-box evidence is not bound to the current release commit.")
@@ -226,10 +229,16 @@ def validate_blackbox_attestation(payload: dict[str, Any], *, head: str, version
     objective_chars = payload["plugin_goal_objective_chars"]
     if not isinstance(objective_chars, int) or not 2000 <= objective_chars <= 3500:
         raise PublishError("Black-box Goal objective length is outside the supported detailed range.")
-    if payload["goal_set_before_create_goal"] is not True:
-        raise PublishError("Black-box run created the native Goal before finalizing the detailed Goal contract.")
-    if payload["get_goal_verified_exact"] is not True:
+    if payload["native_goal_set_verified"] is not True:
+        raise PublishError("Black-box run did not set the finalized detailed Goal through Codex app-server.")
+    if payload["native_goal_get_verified_exact"] is not True:
         raise PublishError("Black-box run did not read back and exactly verify the native Goal.")
+    if payload["native_goal_operation"] != "REPLACED":
+        raise PublishError("Black-box run did not replace an existing native Goal.")
+    if payload["replacement_history_verified"] is not True:
+        raise PublishError("Black-box run did not verify durable Goal replacement history.")
+    if payload["previous_goal_objective_achieved"] is not False:
+        raise PublishError("Black-box run falsely marked the superseded Goal as achieved.")
     if not isinstance(payload["online_research_call_count"], int) or payload["online_research_call_count"] < 1:
         raise PublishError("Black-box run has no real online reuse research evidence.")
     if payload["product_validation_passed"] is not True or payload["product_validation_returncode"] != 0:
@@ -246,6 +255,8 @@ def validate_blackbox_attestation(payload: dict[str, Any], *, head: str, version
         "project_path": str(payload["project_path"]),
         "objective_sha256": plugin_hash,
         "objective_chars": objective_chars,
+        "native_goal_operation": payload["native_goal_operation"],
+        "replacement_history_verified": True,
         "online_research_call_count": payload["online_research_call_count"],
         "product_validation_command": str(payload["product_validation_command"]),
         "completed_at": str(payload["completed_at"]),

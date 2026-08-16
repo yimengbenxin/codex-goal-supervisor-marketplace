@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+from unittest import mock
 
 try:
     from .helpers import GOAL_COMPASS, DEFAULT_TIMEOUT, GoalCompassRepoCase, pushd, run_cmd
@@ -128,6 +129,46 @@ class PhasedGoalTests(GoalCompassRepoCase):
         self.assertIn("mock video artifact pipeline", result["goal_mode_objective"])
         self.assertNotIn("project regression proves prompt", result["goal_mode_objective"])
         self.assertEqual(self.json_run("status")["program_phase"]["estimated_hours"], 4.0)
+
+    def test_phase_set_records_replaced_native_goal_without_fake_completion(self) -> None:
+        self.write_contracts(self.phase("P1", "phase_one_pass"))
+        previous_project = self.read_json(".agent/north_star_goal.json")
+        native_result = {
+            "ok": True,
+            "status": "SYNCED",
+            "operation": "REPLACED",
+            "thread_id": "test-thread",
+            "previous": {
+                "objective": "old blocked program objective",
+                "status": "blocked",
+                "tokensUsed": 77,
+                "timeUsedSeconds": 31,
+            },
+            "current": {},
+            "verified": True,
+        }
+        with mock.patch.object(
+            GOAL_COMPASS,
+            "native_goal_bridge_availability",
+            return_value={"available": True, "thread_id": "test-thread", "executable": "fake"},
+        ), mock.patch.object(GOAL_COMPASS, "replace_native_goal", return_value=native_result):
+            result = self.json_run(
+                "phase-set",
+                "--outline-file", "program-outline.json",
+                "--definition-file", "phase.json",
+            )
+
+        self.assertEqual(
+            result["native_goal_sync"]["transition"],
+            "SUPERSEDED_BY_PROGRAM_PHASE_ACTIVATION",
+        )
+        history = [
+            json.loads(line)
+            for line in (self.root / ".agent/goal_replacement_history.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(history[-1]["previous_status"], "blocked")
+        self.assertFalse(history[-1]["objective_achieved"])
+        self.assertEqual(history[-1]["previous_project_snapshot"]["goal"], previous_project["goal"])
 
     def test_phase_set_accepts_documented_aliases_without_schema_guessing(self) -> None:
         outline = self.outline()
@@ -287,9 +328,52 @@ class PhasedGoalTests(GoalCompassRepoCase):
 
         self.assertEqual(completed["program_phase"]["status"], "COMPLETED")
         self.assertEqual(advanced["program_phase"]["phase_id"], "P2")
-        self.assertEqual(advanced["native_goal_sync"]["status"], "CREATE_REQUIRED_AFTER_PREVIOUS_COMPLETE")
+        self.assertEqual(advanced["native_goal_sync"]["status"], "CREATE_REQUIRED")
         self.assertEqual(advanced["goal_mode_objective"], self.read_json(".agent/north_star_goal.json")["goal_mode_objective"])
         self.assertEqual(advanced["program_phase"]["completed_phase_ids"], ["P1"])
+
+    def test_phase_advance_replaces_native_goal_after_validation(self) -> None:
+        self.start_structured_phase()
+        previous_objective = self.read_json(".agent/north_star_goal.json")["goal_mode_objective"]
+        self.json_run("phase-complete", "--reason", "P1 validation passed")
+        self.write_json("phase-two.json", self.phase("P2", "phase_two_pass"))
+
+        captured: dict[str, str] = {}
+
+        def replace(objective: str, **_: object) -> dict:
+            captured["objective"] = objective
+            return {
+                "ok": True,
+                "status": "SYNCED",
+                "operation": "REPLACED",
+                "thread_id": "test-thread",
+                "previous": {
+                    "objective": previous_objective,
+                    "status": "complete",
+                    "tokensUsed": 50,
+                    "timeUsedSeconds": 20,
+                },
+                "current": {"objective": objective, "status": "active"},
+                "verified": True,
+            }
+
+        with mock.patch.object(
+            GOAL_COMPASS,
+            "native_goal_bridge_availability",
+            return_value={"available": True, "thread_id": "test-thread", "executable": "fake"},
+        ), mock.patch.object(GOAL_COMPASS, "replace_native_goal", side_effect=replace):
+            advanced = self.json_run(
+                "phase-advance", "--definition-file", "phase-two.json", "--reason", "P1 validated",
+            )
+
+        self.assertEqual(advanced["native_goal_sync"]["status"], "SYNCED")
+        self.assertEqual(captured["objective"], advanced["goal_mode_objective"])
+        history = [
+            json.loads(line)
+            for line in (self.root / ".agent/goal_replacement_history.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(history[-1]["transition"], "PHASE_ADVANCE_AFTER_VALIDATION")
+        self.assertTrue(history[-1]["objective_achieved"])
 
     def test_phase_telemetry_records_product_action_and_validation(self) -> None:
         self.start_structured_phase()

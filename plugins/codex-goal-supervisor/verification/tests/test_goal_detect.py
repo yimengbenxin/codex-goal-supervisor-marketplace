@@ -426,8 +426,8 @@ class GoalDetectTests(GoalCompassRepoCase):
         self.assertEqual(result["native_goal_sync"]["objective_source_field"], "goal_mode_objective")
         self.assertEqual(result["native_goal_sync"]["objective_chars"], len(objective))
         self.assertEqual(result["native_goal_sync"]["objective_sha256"], expected_hash)
-        self.assertIn("create_goal", result["native_goal_sync"]["required_action"])
-        self.assertIn("get_goal", result["native_goal_sync"]["required_action"])
+        self.assertIn("thread/goal/set", result["native_goal_sync"]["required_action"])
+        self.assertIn("thread/goal/get", result["native_goal_sync"]["required_action"])
         self.assertEqual(north["native_goal_contract"]["objective_sha256"], expected_hash)
         self.assertEqual(north["native_goal_contract"]["objective_chars"], len(objective))
 

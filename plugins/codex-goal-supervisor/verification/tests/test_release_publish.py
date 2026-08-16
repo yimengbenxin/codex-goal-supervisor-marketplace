@@ -24,7 +24,7 @@ class ReleasePublishTests(unittest.TestCase):
     def valid_blackbox_attestation(self) -> dict[str, object]:
         objective_hash = "a" * 64
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_commit": "release-head",
             "plugin_version_tested": "2.8.2+codex.20260816023131",
             "thread_id": "01a-test-thread",
@@ -35,8 +35,11 @@ class ReleasePublishTests(unittest.TestCase):
             "plugin_goal_objective_sha256": objective_hash,
             "native_goal_objective_sha256": objective_hash,
             "plugin_goal_objective_chars": 3200,
-            "goal_set_before_create_goal": True,
-            "get_goal_verified_exact": True,
+            "native_goal_set_verified": True,
+            "native_goal_get_verified_exact": True,
+            "native_goal_operation": "REPLACED",
+            "replacement_history_verified": True,
+            "previous_goal_objective_achieved": False,
             "online_research_call_count": 2,
             "product_validation_command": "python3 scripts/smoke_mvp.py",
             "product_validation_returncode": 0,
@@ -183,6 +186,16 @@ class ReleasePublishTests(unittest.TestCase):
         payload = self.valid_blackbox_attestation()
         payload["native_goal_objective_sha256"] = "b" * 64
         with self.assertRaisesRegex(PUBLISHER.PublishError, "does not exactly match"):
+            PUBLISHER.validate_blackbox_attestation(
+                payload,
+                head="release-head",
+                version="2.8.2+codex.20260816023131",
+            )
+
+    def test_blackbox_attestation_rejects_fake_completion_instead_of_replacement(self) -> None:
+        payload = self.valid_blackbox_attestation()
+        payload["previous_goal_objective_achieved"] = True
+        with self.assertRaisesRegex(PUBLISHER.PublishError, "falsely marked"):
             PUBLISHER.validate_blackbox_attestation(
                 payload,
                 head="release-head",
