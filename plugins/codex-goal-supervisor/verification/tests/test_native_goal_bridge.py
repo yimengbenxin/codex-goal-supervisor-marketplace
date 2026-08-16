@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -100,6 +101,41 @@ class NativeGoalBridgeTests(GoalCompassRepoCase):
                     timeout=0.5,
                 )
         self.assertLess(time.monotonic() - started, 3)
+
+    def test_package_selftest_never_touches_host_native_goal(self) -> None:
+        invocation_log = self.root / "native-app-server-invoked.txt"
+        trap = self.root / "trap-codex.py"
+        trap.write_text(
+            "#!/usr/bin/env python3\n"
+            "from pathlib import Path\n"
+            f"Path({str(invocation_log)!r}).write_text('invoked\\n', encoding='utf-8')\n"
+            "raise SystemExit(91)\n",
+            encoding="utf-8",
+        )
+        plugin_root = Path(__file__).resolve().parents[2]
+        selftest = plugin_root / "assets" / "governor-harness" / ".agent" / "selftest" / "test_goal_compass.py"
+        env = dict(os.environ)
+        env.update(
+            {
+                "CODEX_THREAD_ID": "real-host-task-must-not-change",
+                "CODEX_EXECUTABLE": str(trap),
+                "GOAL_SUPERVISOR_NATIVE_GOAL_BRIDGE": "enabled",
+            }
+        )
+
+        completed = subprocess.run(
+            [sys.executable, str(selftest)],
+            cwd=plugin_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("Goal Compass selftest OK", completed.stdout)
+        self.assertFalse(invocation_log.exists(), "selftest invoked the host native Goal bridge")
 
     def test_goal_set_replaces_native_goal_without_fake_completion(self) -> None:
         self.goal_video()
