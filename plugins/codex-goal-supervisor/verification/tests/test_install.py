@@ -35,6 +35,31 @@ def run_installer_no_subprocess(installer_path, repo, force=True, reset_state=Fa
 
 
 class InstallTests(MinimalPluginFixtureCase):
+    def test_runtime_ensure_updates_stale_install_and_preserves_project_state(self) -> None:
+        installer = PLUGIN_ROOT / "scripts" / "install_governor.py"
+        ensure = PLUGIN_ROOT / "scripts" / "ensure_project_runtime.py"
+        run_cmd([sys.executable, str(installer), str(self.repo), "--force", "--no-init"], cwd=PLUGIN_ROOT, timeout=20, check=True)
+        north_path = self.repo / ".agent" / "north_star_goal.json"
+        north = json.loads(north_path.read_text(encoding="utf-8"))
+        north.update({"confirmed": True, "goal": "Preserve this project direction."})
+        north_path.write_text(json.dumps(north, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        runtime_path = self.repo / ".agent" / "goal_compass_runtime" / "native_goal_bridge.py"
+        runtime_path.unlink()
+        provenance_path = self.repo / ".agent" / "goal_compass_install.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance["plugin_version"] = "0.0.0-stale"
+        provenance_path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+
+        result = run_cmd([sys.executable, str(ensure), str(self.repo)], cwd=PLUGIN_ROOT, timeout=40, check=True)
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "UPDATED")
+        self.assertIn("managed_runtime_hash_mismatch", payload["before"]["reasons"])
+        self.assertTrue(payload["after"]["current"])
+        self.assertTrue(payload["project_state_preserved"])
+        self.assertFalse(payload["current_task_hook_reload_verified"])
+        self.assertEqual(json.loads(north_path.read_text(encoding="utf-8"))["goal"], "Preserve this project direction.")
+
     def test_feedback_device_helper_has_no_manual_token_input(self) -> None:
         script = PLUGIN_ROOT / "scripts" / "configure_feedback_client.py"
         result = run_cmd(
@@ -63,7 +88,7 @@ class InstallTests(MinimalPluginFixtureCase):
         manifest = json.loads((plugin_root / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "codex-goal-supervisor")
         self.assertEqual(manifest["interface"]["displayName"], "Codex Goal Supervisor")
-        self.assertTrue(str(manifest["version"]).startswith("2."))
+        self.assertTrue(str(manifest["version"]).startswith("3."))
         for relative in ["README.md", "INSTALL_GOAL_COMPASS.zh.md", "skills/goal-supervisor/SKILL.md"]:
             text = (plugin_root / relative).read_text(encoding="utf-8")
             self.assertNotIn("Goal Supervisor V2", text)
@@ -76,6 +101,7 @@ class InstallTests(MinimalPluginFixtureCase):
         provenance = json.loads((self.repo / ".agent" / "goal_compass_install.json").read_text(encoding="utf-8"))
         self.assertTrue(provenance["initialized"])
         self.assertEqual(len(provenance["runtime_sha256"]), 64)
+        self.assertEqual(len(provenance["managed_runtime_sha256"]), 64)
         self.assertEqual(provenance["migration_policy"], "preserve_project_state_and_remove_only_known_legacy_examples")
         hooks = json.loads((self.repo / ".codex" / "hooks.json").read_text(encoding="utf-8"))
         windows = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["commandWindows"]
@@ -85,6 +111,10 @@ class InstallTests(MinimalPluginFixtureCase):
         self.assertEqual(feedback["deployment_context"], "unknown")
         self.assertFalse(feedback["upload_enabled"])
         self.assertEqual(feedback["delivery"], "local_outbox_only")
+        self.assertTrue((self.repo / ".agent" / "contracts" / "capability_catalog.v1.json").is_file())
+        self.assertTrue((self.repo / ".agent" / "contracts" / "general_profile_initial.v1.json").is_file())
+        self.assertTrue((self.repo / ".agent" / "contracts" / "goal_profile_2_8_10.v1.json").is_file())
+        self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "instruction_hygiene.py").is_file())
 
     def test_interactive_install_asks_context_and_defaults_to_no_upload(self) -> None:
         installer = load_installer(self.plugin / "scripts" / "install_governor.py")
@@ -211,6 +241,7 @@ class InstallTests(MinimalPluginFixtureCase):
         self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "roadmap.py").exists())
         self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "roadmap.html").exists())
         self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "procedure_memory.py").exists())
+        self.assertTrue((self.repo / ".agent" / "goal_compass_runtime" / "instruction_hygiene.py").exists())
         self.assertTrue((self.repo / ".agent" / "quarantine_manifest.jsonl").exists())
         self.assertTrue((self.repo / ".codex" / "hooks.json").exists())
         self.assertEqual(json.loads((self.repo / ".codex" / "hooks.json").read_text()), {"hooks": {}})

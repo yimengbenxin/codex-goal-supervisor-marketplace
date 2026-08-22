@@ -21,6 +21,41 @@ SPEC.loader.exec_module(PUBLISHER)
 
 
 class ReleasePublishTests(unittest.TestCase):
+    def test_dirty_worktree_fingerprint_tracks_content_not_only_status_paths(self) -> None:
+        script = PLUGIN_ROOT / "scripts" / "worktree_fingerprint.py"
+        with tempfile.TemporaryDirectory() as value:
+            root = Path(value)
+            subprocess.run(["git", "init"], cwd=root, timeout=5, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            (root / "tracked.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=root, timeout=5, check=True)
+            subprocess.run(
+                ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "base"],
+                cwd=root, timeout=5, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            (root / "tracked.txt").write_text("first dirty value\n", encoding="utf-8")
+            (root / "untracked.txt").write_text("first untracked value\n", encoding="utf-8")
+            first = subprocess.run(
+                [sys.executable, str(script), str(root)], cwd=root, timeout=10, check=True,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            (root / "tracked.txt").write_text("second dirty value\n", encoding="utf-8")
+            second = subprocess.run(
+                [sys.executable, str(script), str(root)], cwd=root, timeout=10, check=True,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            (root / "untracked.txt").write_text("second untracked value\n", encoding="utf-8")
+            third = subprocess.run(
+                [sys.executable, str(script), str(root)], cwd=root, timeout=10, check=True,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+        first_payload = json.loads(first.stdout)
+        second_payload = json.loads(second.stdout)
+        third_payload = json.loads(third.stdout)
+        self.assertTrue(first_payload["dirty"])
+        self.assertNotEqual(first_payload["worktree_fingerprint_sha256"], second_payload["worktree_fingerprint_sha256"])
+        self.assertNotEqual(second_payload["worktree_fingerprint_sha256"], third_payload["worktree_fingerprint_sha256"])
+
     def valid_blackbox_attestation(self) -> dict[str, object]:
         objective_hash = "a" * 64
         return {

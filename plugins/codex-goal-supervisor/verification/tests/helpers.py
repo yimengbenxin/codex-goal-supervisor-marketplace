@@ -383,7 +383,7 @@ class MinimalPluginFixtureCase(unittest.TestCase):
                 shutil.copy2(src, dst)
             else:
                 dst.write_text("{}\n", encoding="utf-8")
-        for rel in [".agent/lenses", ".agent/protocols", ".agent/docs", ".agent/selftest"]:
+        for rel in [".agent/contracts", ".agent/lenses", ".agent/protocols", ".agent/docs", ".agent/selftest"]:
             src = HARNESS_ROOT / rel
             dst = assets / rel
             dst.parent.mkdir(parents=True, exist_ok=True)

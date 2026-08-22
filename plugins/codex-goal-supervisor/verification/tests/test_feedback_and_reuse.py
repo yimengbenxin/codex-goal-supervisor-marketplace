@@ -11,8 +11,10 @@ from unittest import mock
 
 try:
     from .helpers import GOAL_COMPASS, GoalCompassRepoCase, pushd
+    from .test_goal_detect import detailed_goal_definition
 except ImportError:
     from helpers import GOAL_COMPASS, GoalCompassRepoCase, pushd
+    from test_goal_detect import detailed_goal_definition
 
 from goal_compass_runtime import feedback as feedback_runtime
 
@@ -380,6 +382,50 @@ class FeedbackAndReuseTests(GoalCompassRepoCase):
             self.assertEqual(decided.returncode, 0)
             started = self.cli("start", ".agent/tickets/examples/VIDEO-MOCK-001.json")
             self.assertEqual(started.returncode, 0)
+
+    def test_goal_set_persists_researched_reuse_rejection_for_onboarding(self) -> None:
+        fixture = self.write_reuse_fixture({
+            "total_count": 1,
+            "incomplete_results": False,
+            "items": [{
+                "full_name": "example/traceable-packaging-release",
+                "html_url": "https://github.com/example/traceable-packaging-release",
+                "description": "Traceable packaging release evidence workflow with validation artifacts.",
+                "stargazers_count": 1200,
+                "language": "Python",
+                "license": {"spdx_id": "MIT"},
+                "archived": False,
+                "topics": ["packaging", "release", "evidence", "validation"],
+                "pushed_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            }],
+        })
+        definition = detailed_goal_definition()
+        definition["planning_research"].update({
+            "reusable_candidate_found": False,
+            "reusable_candidate_name": None,
+            "no_suitable_reuse_reason": (
+                "The discovered video package does not provide the accepted deterministic artifact contract, "
+                "so the project keeps the smallest compatible local implementation."
+            ),
+            "reuse_decisions": [],
+            "user_consultation": {},
+        })
+        definition_path = self.root / "goal-definition.json"
+        definition_path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        with mock.patch.dict(os.environ, {"GOAL_COMPASS_REUSE_PROBE_FIXTURE": str(fixture)}):
+            result = self.json_run(
+                "goal-set",
+                "--text", "Build a traceable packaging release evidence system.",
+                "--definition-file", "goal-definition.json",
+                "--require-detailed",
+            )
+
+        state = self.read_json(".agent/runtime/reuse_probe.json")
+        self.assertEqual(result["reuse"]["decision"], "REJECT_WITH_EVIDENCE")
+        self.assertEqual(result["reuse"]["required_action"], "continue")
+        self.assertEqual(state["project_decision"]["status"], "REJECT_WITH_EVIDENCE")
 
     def test_generic_quality_words_do_not_create_blocking_reuse_candidate(self) -> None:
         fixture = self.write_reuse_fixture({

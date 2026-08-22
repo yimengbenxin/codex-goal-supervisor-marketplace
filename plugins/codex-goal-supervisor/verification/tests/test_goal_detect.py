@@ -373,6 +373,29 @@ class GoalDetectTests(GoalCompassRepoCase):
         self.assertIn("planning_research.refresh_interval_hours=24", result["missing_fields"])
         self.assertIn("process.nodes[0].timebox_hours>0", result["missing_fields"])
 
+    def test_goal_set_validate_only_returns_exact_objective_without_state_change(self) -> None:
+        definition = detailed_goal_definition()
+        path = self.root / "goal-definition.json"
+        path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+        before = self.read_json(".agent/north_star_goal.json")
+
+        result = self.json_run(
+            "goal-set",
+            "--text", "Build a traceable packaging release evidence system.",
+            "--definition-file", "goal-definition.json",
+            "--require-detailed",
+            "--validate-only",
+        )
+        after = self.read_json(".agent/north_star_goal.json")
+
+        self.assertEqual(result["status"], "GOAL_CONTRACT_VALIDATED")
+        self.assertTrue(result["detailed"])
+        self.assertGreaterEqual(result["goal_mode_objective_chars"], 2000)
+        self.assertLessEqual(result["goal_mode_objective_chars"], 3500)
+        self.assertFalse(result["state_changed"])
+        self.assertFalse(result["native_goal_called"])
+        self.assertEqual(before, after)
+
     def test_long_segment_requires_bounded_reminder_cadence(self) -> None:
         definition = detailed_goal_definition()
         definition["process"]["nodes"][1]["reminder_interval_hours"] = 0
@@ -456,6 +479,29 @@ class GoalDetectTests(GoalCompassRepoCase):
         self.assertGreater(len(plan), 4000)
         self.assertNotIn("tool_sources_reviewed", plan)
         self.assertNotIn("reuse_decisions", plan)
+
+    def test_super_complex_plan_accepts_canonical_goal_contribution_heading(self) -> None:
+        plan_ref = "docs/PROJECT_EXECUTION_PLAN.md"
+        plan_path = self.root / plan_ref
+        plan_path.parent.mkdir(parents=True)
+        plan = super_complex_plan_text()
+        plan = plan.replace("对总目标", "parent outcome")
+        plan += "\n\n## goal_contribution\nEach module supplies a verified output to the parent consumer.\n"
+        plan_path.write_text(plan, encoding="utf-8")
+        definition = super_complex_goal_definition(plan_ref)
+        definition_path = self.root / "goal-definition.json"
+        definition_path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        result = self.json_run(
+            "goal-set",
+            "--text", "Build a traceable packaging release evidence system.",
+            "--definition-file", "goal-definition.json",
+            "--require-detailed",
+            "--validate-only",
+        )
+
+        self.assertEqual(result["status"], "GOAL_CONTRACT_VALIDATED")
+        self.assertNotIn("plan.goal_contribution", result.get("missing_fields", []))
 
     def test_super_complex_goal_requires_visible_reuse_and_commercial_consultation(self) -> None:
         plan_ref = "docs/PROJECT_EXECUTION_PLAN.md"

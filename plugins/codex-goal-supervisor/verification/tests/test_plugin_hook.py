@@ -834,14 +834,14 @@ class PluginHookTests(unittest.TestCase):
         payload = json.loads(north.read_text(encoding="utf-8"))
         payload.update({
             "confirmed": True,
-            "goal": "Deliver the complete Personal AI OS product.",
+            "goal": "Deliver the complete multi-surface product.",
             "goal_definition": {
                 "quality": "STRUCTURED_DETAILED",
                 "success_criteria": ["All product paths reach their acceptance evidence."],
                 "process": {"nodes": [
-                    {"node_id": "N1", "name": "iPhone path"},
-                    {"node_id": "N2", "name": "Watch path"},
-                    {"node_id": "N3", "name": "RayNeo path"},
+                    {"node_id": "N1", "name": "Primary client path"},
+                    {"node_id": "N2", "name": "Secondary client path"},
+                    {"node_id": "N3", "name": "Companion client path"},
                     {"node_id": "N4", "name": "Shared session"},
                 ]},
                 "final_acceptance": [{"criterion": "Run the complete field demo three times."}],
@@ -860,7 +860,7 @@ class PluginHookTests(unittest.TestCase):
         result = json.loads(output)
         self.assertEqual(result["decision"], "block")
         self.assertIn("DEFERRED_LOCAL", result["reason"])
-        self.assertIn("iPhone path", result["reason"])
+        self.assertIn("Primary client path", result["reason"])
         self.assertIn("use tools now", result["reason"])
         state = json.loads((self.repo / ".agent/runtime/convergence_state.json").read_text(encoding="utf-8"))
         self.assertEqual(state["recovery"]["blocker_scope_review"]["status"], "CONTINUE_INDEPENDENT_PATH")

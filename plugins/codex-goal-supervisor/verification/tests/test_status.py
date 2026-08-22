@@ -19,7 +19,8 @@ class StatusTests(GoalCompassRepoCase):
         self.assertEqual(result["backlog"]["count"], 0)
         self.assertEqual(result["mdcp"]["current_required_action"], "continue_normal_execution")
         self.assertNotIn("tool_mode", result)
-        self.assertEqual(result["status"], "NEEDS_CONFIRMATION")
+        self.assertEqual(result["status"], "IDLE")
+        self.assertEqual(result["profile"], "general-initial")
 
     def test_status_reports_goal_definition_and_preservation_policy(self) -> None:
         self.json_run(

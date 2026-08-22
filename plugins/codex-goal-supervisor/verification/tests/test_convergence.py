@@ -18,10 +18,12 @@ from goal_compass_runtime.convergence import (
     auto_start_segment,
     empty_state,
     external_prerequisite_stop_review,
+    goal_contract_fingerprint,
     judge_trigger,
     record_blocker_scope_review,
     record_collaboration_round,
     record_iteration,
+    refresh,
     start_segment,
     complete_segment,
     due_segment_reminder,
@@ -50,12 +52,153 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         schema = self.read_json(".agent/protocols/llm_judge.schema.json")
         self.assertIn("CONFIRM_TARGETED_RAIL", schema["properties"]["verdict"]["enum"])
 
+    def test_goal_change_supersedes_old_segments_and_resets_goal_scoped_progress(self) -> None:
+        old_north = {
+            "goal": "Deliver the old product direction.",
+            "goal_mode_objective": "Old detailed objective",
+            "goal_definition": {
+                "process": {"nodes": [{
+                    "node_id": "OLD",
+                    "name": "Old route",
+                    "objective": "Finish the old route.",
+                    "dependencies": [],
+                    "inputs": ["old input"],
+                    "actions": ["old action"],
+                    "outputs": ["old output"],
+                    "exit_criteria": ["old evidence"],
+                    "execution_mode": "SERIAL",
+                    "contribution_to_goal": "old contribution",
+                    "timebox_hours": 2,
+                    "reminder_interval_hours": 0,
+                }]},
+            },
+        }
+        state = refresh(
+            empty_state(), north_star=old_north, phase={}, ticket={},
+            updated_at="2026-08-22T00:00:00+00:00",
+        )
+        state, _ = start_segment(state, node_id="OLD", observed_at="2026-08-22T00:01:00+00:00")
+        state["activity"]["writes"] = 12
+        state["progress"]["evidence_count"] = 3
+
+        new_north = {
+            "goal": "Deliver the new product direction.",
+            "goal_mode_objective": "New detailed objective",
+            "goal_definition": {
+                "process": {"nodes": [{
+                    "node_id": "NEW",
+                    "name": "New route",
+                    "objective": "Finish the new route.",
+                    "dependencies": [],
+                    "inputs": ["new input"],
+                    "actions": ["new action"],
+                    "outputs": ["new output"],
+                    "exit_criteria": ["new evidence"],
+                    "execution_mode": "SERIAL",
+                    "contribution_to_goal": "new contribution",
+                    "timebox_hours": 2,
+                    "reminder_interval_hours": 0,
+                }]},
+            },
+        }
+        changed = refresh(
+            state, north_star=new_north, phase={}, ticket={},
+            updated_at="2026-08-22T01:00:00+00:00",
+        )
+
+        self.assertEqual(changed["segments"]["active"], {})
+        self.assertEqual(changed["schema_version"], "1.1")
+        self.assertEqual(changed["segments"]["completed"], [])
+        self.assertEqual(changed["segments"]["superseded"][-1]["node_id"], "OLD")
+        self.assertEqual(changed["segments"]["superseded"][-1]["status"], "SUPERSEDED")
+        self.assertEqual(changed["goal_history"][-1]["transition"], "SUPERSEDED_BY_GOAL_CHANGE")
+        self.assertEqual(changed["activity"]["writes"], 0)
+        self.assertEqual(changed["progress"]["evidence_count"], 0)
+        self.assertEqual(changed["goal_stack"]["l0_final_goal"], "Deliver the new product direction.")
+
+    def test_goal_certificate_fingerprint_ignores_read_time_defaults_but_not_contract_change(self) -> None:
+        raw = {
+            "confirmed": True,
+            "goal": "Deliver the verified product.",
+            "goal_mode_objective": "Detailed verified product objective.",
+            "anti_goals": [],
+            "goal_definition": {
+                "non_goals": ["Do not build the unrelated marketplace."],
+                "final_acceptance": [{"criterion": "Project regression passes."}],
+            },
+        }
+        enriched = dict(raw)
+        enriched["source"] = "read_time_compatibility"
+        enriched["confirmed_at"] = "2026-08-22T00:00:00+00:00"
+        enriched["anti_goals"] = ["Do not build the unrelated marketplace."]
+
+        self.assertEqual(goal_contract_fingerprint(raw), goal_contract_fingerprint(enriched))
+        changed = json.loads(json.dumps(raw))
+        changed["goal_mode_objective"] = "A materially changed objective."
+        self.assertNotEqual(goal_contract_fingerprint(raw), goal_contract_fingerprint(changed))
+
+    def test_successful_hook_refresh_does_not_stale_current_goal_certificate(self) -> None:
+        self.certifiable_goal()
+        self.json_run(
+            "convergence", "--certify-goal",
+            "--final-validation-id", "mock_video_pipeline_test",
+        )
+        state = self.read_json(".agent/runtime/convergence_state.json")
+        raw_north = self.read_json(".agent/north_star_goal.json")
+
+        refreshed = refresh(
+            state,
+            north_star=raw_north,
+            phase={},
+            ticket={},
+            updated_at="2026-08-22T01:00:00+00:00",
+        )
+
+        self.assertEqual(refreshed["goal_completion"]["status"], "CERTIFIED_COMPLETE")
+
+    def test_same_goal_refresh_preserves_active_segment_and_progress(self) -> None:
+        north = {
+            "goal": "Deliver one stable direction.",
+            "goal_mode_objective": "Stable detailed objective",
+            "goal_definition": {
+                "process": {"nodes": [{
+                    "node_id": "N1",
+                    "name": "Stable route",
+                    "objective": "Finish the stable route.",
+                    "dependencies": [],
+                    "inputs": ["input"],
+                    "actions": ["action"],
+                    "outputs": ["output"],
+                    "exit_criteria": ["evidence"],
+                    "execution_mode": "SERIAL",
+                    "contribution_to_goal": "contribution",
+                    "timebox_hours": 2,
+                    "reminder_interval_hours": 0,
+                }]},
+            },
+        }
+        state = refresh(
+            empty_state(), north_star=north, phase={}, ticket={},
+            updated_at="2026-08-22T00:00:00+00:00",
+        )
+        state, _ = start_segment(state, node_id="N1", observed_at="2026-08-22T00:01:00+00:00")
+        state["progress"]["evidence_count"] = 2
+
+        same = refresh(
+            state, north_star=north, phase={}, ticket={},
+            updated_at="2026-08-22T00:30:00+00:00",
+        )
+
+        self.assertIn("N1", same["segments"]["active"])
+        self.assertEqual(same["progress"]["evidence_count"], 2)
+        self.assertEqual(same["goal_history"], [])
+
     def test_segment_start_creates_real_deadline_and_short_segment_waits_until_deadline(self) -> None:
         state = empty_state()
         state["goal_stack"]["goal_contract"]["modules"] = [{
             "node_id": "N1",
-            "name": "Watch data bridge",
-            "objective": "Read Watch data through the accepted bridge.",
+            "name": "Telemetry data bridge",
+            "objective": "Read telemetry data through the accepted bridge.",
             "dependencies": [],
             "timebox_hours": 2,
             "reminder_interval_hours": 0,
@@ -72,7 +215,7 @@ class ConvergenceStateTests(GoalCompassRepoCase):
             state,
             node_id="N1",
             observed_at="2026-08-14T02:05:00+00:00",
-            evidence_ids=["watch-bridge-test"],
+            evidence_ids=["telemetry-bridge-test"],
         )
         self.assertEqual(completed["status"], "COMPLETED")
         self.assertEqual(state["segments"]["active"], {})
@@ -184,8 +327,8 @@ class ConvergenceStateTests(GoalCompassRepoCase):
                 "reminder_interval_hours": 2,
             },
             {
-                "node_id": "WATCH",
-                "name": "Watch data bridge",
+                "node_id": "TELEMETRY",
+                "name": "Telemetry data bridge",
                 "dependencies": [],
                 "timebox_hours": 2,
                 "reminder_interval_hours": 0,
@@ -202,9 +345,9 @@ class ConvergenceStateTests(GoalCompassRepoCase):
         state, started = auto_start_segment(
             state,
             observed_at="2026-08-14T00:00:00+00:00",
-            hints=["Begin the Watch data bridge implementation."],
+            hints=["Begin the telemetry data bridge implementation."],
         )
-        self.assertEqual(started["node_id"], "WATCH")
+        self.assertEqual(started["node_id"], "TELEMETRY")
         self.assertEqual(started["started_by"], "BACKGROUND_HIGH_CONFIDENCE")
 
     def test_init_projects_an_existing_confirmed_north_star(self) -> None:
@@ -299,12 +442,12 @@ class ConvergenceStateTests(GoalCompassRepoCase):
 
     def test_external_prerequisite_selects_dependency_ready_goal_path(self) -> None:
         state = empty_state()
-        state["goal_stack"]["l0_final_goal"] = "Deliver the complete Personal AI OS product."
+        state["goal_stack"]["l0_final_goal"] = "Deliver the complete multi-surface product."
         state["goal_stack"]["goal_contract"] = {
             "modules": [
-                {"node_id": "N1", "name": "iPhone path"},
-                {"node_id": "N2", "name": "Watch path"},
-                {"node_id": "N3", "name": "RayNeo path"},
+                {"node_id": "N1", "name": "Primary client path"},
+                {"node_id": "N2", "name": "Secondary client path"},
+                {"node_id": "N3", "name": "Companion client path"},
                 {"node_id": "N4", "name": "Shared session"},
             ],
             "module_count_total": 4,
@@ -319,8 +462,8 @@ class ConvergenceStateTests(GoalCompassRepoCase):
 
         self.assertTrue(review["should_continue"])
         self.assertEqual(review["status"], "CONTINUE_INDEPENDENT_PATH")
-        self.assertIn("iPhone path", review["reason"])
-        self.assertIn("RayNeo path", review["reason"])
+        self.assertIn("Primary client path", review["reason"])
+        self.assertIn("Companion client path", review["reason"])
         self.assertIn("use tools now", review["reason"])
         recorded = record_blocker_scope_review(
             state,
@@ -933,7 +1076,10 @@ class LlmJudgeTests(GoalCompassRepoCase):
 class ExplicitActivationContractTests(GoalCompassRepoCase):
     def test_skill_requires_north_star_and_client_goal_mode_after_explicit_activation(self) -> None:
         text = (PLUGIN_ROOT / "skills/goal-supervisor/SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("establishing the project North Star and starting the Codex client Goal mode are mandatory", text)
+        self.assertIn("Explicit plugin activation starts the General Profile", text)
+        self.assertIn("does not by itself require a North Star", text)
+        self.assertIn("The Goal Profile inherits every General requirement", text)
+        self.assertIn("establishing the project North Star and starting", text)
         self.assertIn("Never claim activation is complete when only one of these two states exists", text)
         self.assertLess(text.index("goal-set --require-detailed"), text.index("thread/goal/set"))
         self.assertIn("verifies byte equality", text)
