@@ -276,7 +276,7 @@ def _public_server_state(metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def ensure_server(project_root: Path, *, wait_seconds: float = 2.5) -> dict[str, Any]:
+def ensure_server(project_root: Path, *, wait_seconds: float = 5.0) -> dict[str, Any]:
     root = project_root.resolve()
     snapshot = build_snapshot(root)
     if not snapshot.get("route_map_ready"):
@@ -304,6 +304,8 @@ def ensure_server(project_root: Path, *, wait_seconds: float = 2.5) -> dict[str,
     token = secrets.token_urlsafe(24)
     command = [
         sys.executable,
+        "-I",
+        "-S",
         str(Path(__file__).resolve()),
         "--serve",
         "--project-root",
@@ -328,16 +330,34 @@ def ensure_server(project_root: Path, *, wait_seconds: float = 2.5) -> dict[str,
         time.sleep(0.05)
         current = _load_json(state_path, {})
         current_url = str(current.get("url") or "")
-        if current.get("pid") == process.pid and current_url and _healthy(current_url, root):
+        # The child writes this metadata only after the loopback socket is
+        # bound. Treat that atomic write as the startup witness; waiting for a
+        # second scheduled HTTP round trip made healthy servers look failed on
+        # busy machines.
+        if current.get("pid") == process.pid and current_url and process.poll() is None:
             current["route_map_ready"] = True
             return {**_public_server_state(current), "route_map_ready": True}
         if process.poll() is not None:
             break
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1.0)
+    failed_metadata = _load_json(state_path, {})
+    if failed_metadata.get("pid") == process.pid:
+        try:
+            state_path.unlink()
+        except OSError:
+            pass
     return {
         "status": "START_FAILED",
         "url": None,
         "pid": process.pid,
         "route_map_ready": True,
+        "reason": f"roadmap server did not publish bound-port metadata within {max(0.25, wait_seconds):g}s",
         "required_action": "roadmap",
     }
 

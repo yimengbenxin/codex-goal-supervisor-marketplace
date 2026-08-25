@@ -325,7 +325,10 @@ def configure_feedback_policy(target: Path, context: str, allow_upload: bool) ->
         context,
     ]
     if allow_upload:
-        command.extend(["--allow-upload", "--confirm-upload", "--flush"])
+        # Installation records consent and provisions the device credential.
+        # Delivery is event-driven afterwards; flushing an existing outbox here
+        # would make a local install wait on the network.
+        command.extend(["--allow-upload", "--confirm-upload"])
     else:
         command.append("--deny-upload")
     result = subprocess.run(

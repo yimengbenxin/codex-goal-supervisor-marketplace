@@ -8,11 +8,12 @@ from __future__ import annotations
 import fnmatch
 import functools
 import hashlib
+import io
 import json
 import os
 import re
+import runpy
 import shlex
-import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -972,25 +973,20 @@ def destructive_git(command: str) -> str | None:
 
 
 def delegate_full(raw: str) -> int:
+    old_stdin = sys.stdin
+    old_argv = sys.argv
     try:
-        result = subprocess.run(
-            [sys.executable, str(FULL_COMPASS), "hook"],
-            cwd=str(PROJECT_ROOT),
-            input=raw,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=14,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        sys.stdin = io.StringIO(raw)
+        sys.argv = [str(FULL_COMPASS), "hook"]
+        runpy.run_path(str(FULL_COMPASS), run_name="__main__")
+    except SystemExit as exc:
+        if isinstance(exc.code, int) and exc.code != 0:
+            output(context="Observer contract runtime returned an error; execution continues.")
+    except Exception:
         output(context="Observer contract runtime was unavailable; execution continues.")
-        return 0
-    if result.returncode != 0:
-        output(context="Observer contract runtime returned an error; execution continues.")
-        return 0
-    if result.stdout:
-        sys.stdout.write(result.stdout)
+    finally:
+        sys.stdin = old_stdin
+        sys.argv = old_argv
     return 0
 
 

@@ -82,6 +82,13 @@ class ReleasePublishTests(unittest.TestCase):
             "completed_at": "2026-08-16T02:31:31+08:00",
         }
 
+    def valid_created_blackbox_attestation(self) -> dict[str, object]:
+        payload = self.valid_blackbox_attestation()
+        payload["native_goal_operation"] = "CREATED"
+        payload["replacement_history_verified"] = False
+        payload["previous_goal_objective_achieved"] = None
+        return payload
+
     def test_release_identity_requires_timestamped_semver(self) -> None:
         self.assertEqual(
             PUBLISHER.release_identity("2.4.5+codex.20260812150000"),
@@ -199,6 +206,30 @@ class ReleasePublishTests(unittest.TestCase):
                 PUBLISHER.publish(dry_run=True)
         compile_source.assert_not_called()
 
+    def test_release_gate_runs_each_complete_suite_once_across_source_and_archive(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "ok", "")
+        with mock.patch.object(PUBLISHER, "run_command", return_value=completed) as run:
+            PUBLISHER.run_source_verification()
+        source_commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [sys.executable, "-m", "unittest", "-q", "verification.tests.test_goal_compass"],
+            source_commands,
+        )
+        self.assertFalse(any("discover" in command for command in source_commands))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "full.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("codex-goal-supervisor/README.md", "release\n")
+            with mock.patch.object(PUBLISHER, "run_command", return_value=completed) as run:
+                PUBLISHER.run_extracted_verification(archive)
+        archive_commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [sys.executable, "-m", "unittest", "discover", "-s", "verification/tests", "-q"],
+            archive_commands,
+        )
+        self.assertFalse(any("verification.tests.test_goal_compass" in command for command in archive_commands))
+
     def test_release_requires_blackbox_attestation_before_verification(self) -> None:
         with mock.patch.object(PUBLISHER, "BLACKBOX_ATTESTATION", Path("/definitely/missing")):
             with self.assertRaisesRegex(PUBLISHER.PublishError, "pre-publication real black-box"):
@@ -245,6 +276,45 @@ class ReleasePublishTests(unittest.TestCase):
         )
         self.assertEqual(result["objective_chars"], 3200)
         self.assertEqual(result["thread_title"], "插件专用测试线程")
+
+    def test_blackbox_attestation_accepts_truthful_first_goal_creation(self) -> None:
+        result = PUBLISHER.validate_blackbox_attestation(
+            self.valid_created_blackbox_attestation(),
+            head="release-head",
+            version="2.8.2+codex.20260816023131",
+        )
+        self.assertEqual(result["native_goal_operation"], "CREATED")
+        self.assertFalse(result["replacement_history_verified"])
+
+    def test_created_blackbox_attestation_cannot_claim_replacement_history(self) -> None:
+        payload = self.valid_created_blackbox_attestation()
+        payload["replacement_history_verified"] = True
+        with self.assertRaisesRegex(PUBLISHER.PublishError, "cannot claim replacement history"):
+            PUBLISHER.validate_blackbox_attestation(
+                payload,
+                head="release-head",
+                version="2.8.2+codex.20260816023131",
+            )
+
+    def test_created_blackbox_attestation_cannot_claim_previous_goal_outcome(self) -> None:
+        payload = self.valid_created_blackbox_attestation()
+        payload["previous_goal_objective_achieved"] = False
+        with self.assertRaisesRegex(PUBLISHER.PublishError, "cannot claim a previous Goal outcome"):
+            PUBLISHER.validate_blackbox_attestation(
+                payload,
+                head="release-head",
+                version="2.8.2+codex.20260816023131",
+            )
+
+    def test_blackbox_attestation_rejects_unknown_goal_operation(self) -> None:
+        payload = self.valid_blackbox_attestation()
+        payload["native_goal_operation"] = "COMPLETED"
+        with self.assertRaisesRegex(PUBLISHER.PublishError, "must be CREATED or REPLACED"):
+            PUBLISHER.validate_blackbox_attestation(
+                payload,
+                head="release-head",
+                version="2.8.2+codex.20260816023131",
+            )
 
     def test_existing_release_requires_exact_asset_digests(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -1804,6 +1804,55 @@ def render_goal_mode_objective(definition: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
+def commercial_use_confirmation_required(research: dict[str, Any]) -> bool:
+    explicit = research.get("commercial_use_affects_compatibility")
+    if isinstance(explicit, bool):
+        return explicit
+
+    decisions = research.get("reuse_decisions") if isinstance(research.get("reuse_decisions"), list) else []
+    restriction_markers = (
+        "non-commercial",
+        "noncommercial",
+        "non commercial",
+        "by-nc",
+        "nc-only",
+        "personal use only",
+        "research use only",
+        "evaluation use only",
+        "commercial license required",
+        "commercial subscription required",
+        "separate commercial license",
+        "unknown license",
+        "license unknown",
+        "unlicensed",
+        "no license",
+    )
+    compatibility_markers = (
+        "commercial use allowed",
+        "commercial use permitted",
+        "commercially compatible",
+        "commercial compatibility confirmed",
+        "commercial use confirmed",
+    )
+    for row in decisions:
+        if not isinstance(row, dict):
+            continue
+        row_explicit = row.get("commercial_use_affects_compatibility")
+        if isinstance(row_explicit, bool):
+            if row_explicit:
+                return True
+            continue
+        terms = " ".join(
+            str(row.get(field) or "")
+            for field in ("license", "commercial_terms", "reason")
+        ).lower()
+        if any(marker in terms for marker in compatibility_markers):
+            continue
+        if any(marker in terms for marker in restriction_markers):
+            return True
+    return False
+
+
 def planning_research_errors(definition: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     research = definition.get("planning_research") if isinstance(definition.get("planning_research"), dict) else {}
@@ -1832,7 +1881,10 @@ def planning_research_errors(definition: dict[str, Any]) -> list[str]:
             errors.append("planning_research.user_consultation.asked_in_conversation")
         if str(consultation.get("reuse_choice") or "").strip().upper() not in {"USE", "ADAPT", "REJECT"}:
             errors.append("planning_research.user_consultation.reuse_choice")
-        if str(consultation.get("commercial_use") or "").strip().upper() not in {"COMMERCIAL", "NON_COMMERCIAL"}:
+        if (
+            commercial_use_confirmation_required(research)
+            and str(consultation.get("commercial_use") or "").strip().upper() not in {"COMMERCIAL", "NON_COMMERCIAL"}
+        ):
             errors.append("planning_research.user_consultation.commercial_use")
         decisions = research.get("reuse_decisions") if isinstance(research.get("reuse_decisions"), list) else []
         if not decisions:
@@ -7401,7 +7453,16 @@ def cmd_goal_set(args: argparse.Namespace) -> int:
         )
     if args.require_detailed and definition.get("quality") != "STRUCTURED_DETAILED":
         missing_fields = list(definition.get("missing_fields", []))
-        consultation_missing = any("planning_research.user_consultation" in field for field in missing_fields)
+        reuse_consultation_missing = any(
+            field in {
+                "planning_research.user_consultation.asked_in_conversation",
+                "planning_research.user_consultation.reuse_choice",
+            }
+            for field in missing_fields
+        )
+        commercial_consultation_missing = (
+            "planning_research.user_consultation.commercial_use" in missing_fields
+        )
         research = definition.get("planning_research") if isinstance(definition.get("planning_research"), dict) else {}
         candidate = str(research.get("reusable_candidate_name") or "the reusable candidate").strip()
         print(json.dumps({
@@ -7418,12 +7479,21 @@ def cmd_goal_set(args: argparse.Namespace) -> int:
             "detail_metrics": definition.get("detail_metrics", {}),
             "required_action": (
                 "ask_user_about_reuse_and_commercial_use"
-                if consultation_missing
-                else "complete_goal_contract_before_goal_mode"
+                if commercial_consultation_missing
+                else (
+                    "ask_user_about_reuse"
+                    if reuse_consultation_missing
+                    else "complete_goal_contract_before_goal_mode"
+                )
             ),
             **({
-                "user_question": f"A reusable candidate was found: {candidate}. Should we use/adapt it, and is this project commercial or non-commercial?",
-            } if consultation_missing else {}),
+                "user_question": (
+                    f"A reusable candidate was found: {candidate}. Should we use/adapt it, "
+                    "and is this project commercial or non-commercial?"
+                    if commercial_consultation_missing
+                    else f"A reusable candidate was found: {candidate}. Should we use, adapt, or reject it?"
+                ),
+            } if reuse_consultation_missing or commercial_consultation_missing else {}),
         }, ensure_ascii=False, indent=2))
         return 2
     if args.validate_only:

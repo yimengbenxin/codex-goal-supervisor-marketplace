@@ -509,6 +509,8 @@ class GoalDetectTests(GoalCompassRepoCase):
         plan_path.parent.mkdir(parents=True)
         plan_path.write_text(super_complex_plan_text(), encoding="utf-8")
         definition = super_complex_goal_definition(plan_ref, confirmed=False)
+        definition["planning_research"]["commercial_use_affects_compatibility"] = True
+        definition["planning_research"]["reuse_decisions"][0]["license"] = "Non-commercial research license"
         definition_path = self.root / "goal-definition.json"
         definition_path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -526,6 +528,58 @@ class GoalDetectTests(GoalCompassRepoCase):
         self.assertEqual(result["required_action"], "ask_user_about_reuse_and_commercial_use")
         self.assertIn("ExistingTool", result["user_question"])
         self.assertFalse(self.read_json(".agent/north_star_goal.json")["confirmed"])
+
+    def test_permissive_reuse_does_not_require_commercial_consultation(self) -> None:
+        plan_ref = "docs/PROJECT_EXECUTION_PLAN.md"
+        plan_path = self.root / plan_ref
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text(super_complex_plan_text(), encoding="utf-8")
+        definition = super_complex_goal_definition(plan_ref)
+        definition["planning_research"]["commercial_use_affects_compatibility"] = False
+        definition["planning_research"]["user_consultation"].pop("commercial_use")
+        definition["planning_research"]["reuse_decisions"][0]["license"] = "MIT"
+        definition_path = self.root / "goal-definition.json"
+        definition_path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        result = self.json_run(
+            "goal-set",
+            "--text", "Build a traceable packaging release evidence system.",
+            "--definition-file", "goal-definition.json",
+            "--require-detailed",
+            "--validate-only",
+        )
+
+        self.assertEqual(result["status"], "GOAL_CONTRACT_VALIDATED")
+        self.assertNotIn(
+            "planning_research.user_consultation.commercial_use",
+            result.get("missing_fields", []),
+        )
+
+    def test_permissive_reuse_asks_only_for_adoption_when_unconfirmed(self) -> None:
+        plan_ref = "docs/PROJECT_EXECUTION_PLAN.md"
+        plan_path = self.root / plan_ref
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text(super_complex_plan_text(), encoding="utf-8")
+        definition = super_complex_goal_definition(plan_ref, confirmed=False)
+        definition["planning_research"]["commercial_use_affects_compatibility"] = False
+        definition["planning_research"]["reuse_decisions"][0]["license"] = "Apache-2.0"
+        definition_path = self.root / "goal-definition.json"
+        definition_path.write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        result = self.json_run(
+            "goal-set",
+            "--text", "Build a traceable packaging release evidence system.",
+            "--definition-file", "goal-definition.json",
+            "--require-detailed",
+            check=False,
+        )
+
+        self.assertEqual(result["required_action"], "ask_user_about_reuse")
+        self.assertNotIn("commercial", result["user_question"].lower())
+        self.assertNotIn(
+            "planning_research.user_consultation.commercial_use",
+            result["missing_fields"],
+        )
 
     def test_super_complex_goal_rejects_plan_below_four_thousand_characters(self) -> None:
         plan_ref = "docs/PROJECT_EXECUTION_PLAN.md"

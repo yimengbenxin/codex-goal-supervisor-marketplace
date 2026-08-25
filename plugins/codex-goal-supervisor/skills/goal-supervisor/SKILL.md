@@ -446,8 +446,8 @@ Before authoring any detailed Goal-mode contract, or materially rewriting it:
 
 1. Research current tools, open-source projects, product documentation, and relevant technical articles against the North Star and remaining work.
 2. Use the findings to choose the route, but do not paste the research log or candidate list into the final technical plan.
-3. When a reusable candidate is found, ask the user visibly in conversation whether to use/adapt it and whether the project is commercial. Do not infer either answer and do not hide the question in a JSON contract.
-4. Only after the user answers, write the final plan, integrate the accepted tool into the relevant module, state how that integration will be validated, generate the Goal-mode contract, and run `goal-set --require-detailed`.
+3. When a reusable candidate is found, ask the user visibly in conversation whether to use, adapt, or reject it. Ask whether the project is commercial only when that fact changes license compatibility, pricing, permitted use, or the integration boundary. A permissive or otherwise confirmed-compatible route must not be blocked merely because commercial status was not collected. Do not infer an answer that materially changes the route and do not hide a required question in a JSON contract.
+4. Only after the required user answer is available, write the final plan, integrate the accepted tool into the relevant module, state how that integration will be validated, generate the Goal-mode contract, and run `goal-set --require-detailed`.
 
 Research happens when the detailed Goal is first authored or materially rewritten, not on every continuation. If the same long task continues, refresh it after each 24-hour window against the North Star, detailed Goal, and remaining actions. Put the resulting reuse route in Goal mode; never paste the raw research log there. A suitable tool must be used or adapted and validated, not merely mentioned.
 

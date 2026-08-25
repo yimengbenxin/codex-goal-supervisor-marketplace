@@ -14,6 +14,8 @@ except ImportError:
     from helpers import HARNESS_ROOT, GoalCompassRepoCase
     from test_goal_detect import detailed_goal_definition
 
+from goal_compass_runtime import roadmap as roadmap_runtime
+
 
 class RoadmapTests(GoalCompassRepoCase):
     def set_detailed_goal(self, definition: dict | None = None, *, check: bool = True) -> dict:
@@ -158,6 +160,45 @@ class RoadmapTests(GoalCompassRepoCase):
                 os.environ["GOAL_SUPERVISOR_DISABLE_ROADMAP_SERVER"] = "1"
             else:
                 os.environ["GOAL_SUPERVISOR_DISABLE_ROADMAP_SERVER"] = old
+
+    def test_failed_server_start_terminates_delayed_child(self) -> None:
+        class DelayedProcess:
+            pid = 424242
+
+            def __init__(self) -> None:
+                self.terminated = False
+                self.killed = False
+
+            def poll(self):
+                return 0 if self.terminated or self.killed else None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout=None):
+                return 0
+
+        process = DelayedProcess()
+        self.set_detailed_goal()
+        old = os.environ.pop("GOAL_SUPERVISOR_DISABLE_ROADMAP_SERVER", None)
+        try:
+            with mock.patch.object(roadmap_runtime, "build_snapshot", return_value={"route_map_ready": True}), mock.patch.object(
+                roadmap_runtime.subprocess, "Popen", return_value=process
+            ):
+                result = roadmap_runtime.ensure_server(self.root, wait_seconds=0.01)
+        finally:
+            if old is None:
+                os.environ["GOAL_SUPERVISOR_DISABLE_ROADMAP_SERVER"] = "1"
+            else:
+                os.environ["GOAL_SUPERVISOR_DISABLE_ROADMAP_SERVER"] = old
+
+        self.assertEqual(result["status"], "START_FAILED")
+        self.assertTrue(process.terminated)
+        self.assertFalse(process.killed)
+        self.assertIn("bound-port metadata", result["reason"])
 
     def test_dashboard_is_offline_and_reads_only_project_projection(self) -> None:
         html = (HARNESS_ROOT / ".agent/goal_compass_runtime/roadmap.html").read_text(encoding="utf-8")

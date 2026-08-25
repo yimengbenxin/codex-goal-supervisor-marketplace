@@ -76,7 +76,8 @@ Supervisor for a substantive project task:
    one-line North Star, path-only reference, or truncated plan is insufficient.
 3. Research current reusable tools/routes before authoring or materially
    rewriting the detailed Goal. If a viable reuse candidate exists, visibly ask
-   the user about adoption and commercial use before finalizing the route.
+   the user about adoption. Ask about commercial use only when it changes
+   license compatibility, pricing, permitted use, or the integration boundary.
 4. Include first principles, modules, actions, serial/parallel relationships,
    dependencies, inputs, outputs, consumers, project contribution, exit
    criteria, final acceptance, per-segment hour targets, and reuse decisions.

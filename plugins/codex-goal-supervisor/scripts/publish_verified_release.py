@@ -233,12 +233,19 @@ def validate_blackbox_attestation(payload: dict[str, Any], *, head: str, version
         raise PublishError("Black-box run did not set the finalized detailed Goal through Codex app-server.")
     if payload["native_goal_get_verified_exact"] is not True:
         raise PublishError("Black-box run did not read back and exactly verify the native Goal.")
-    if payload["native_goal_operation"] != "REPLACED":
-        raise PublishError("Black-box run did not replace an existing native Goal.")
-    if payload["replacement_history_verified"] is not True:
-        raise PublishError("Black-box run did not verify durable Goal replacement history.")
-    if payload["previous_goal_objective_achieved"] is not False:
-        raise PublishError("Black-box run falsely marked the superseded Goal as achieved.")
+    native_goal_operation = payload["native_goal_operation"]
+    if native_goal_operation == "CREATED":
+        if payload["replacement_history_verified"] is not False:
+            raise PublishError("A newly created native Goal cannot claim replacement history.")
+        if payload["previous_goal_objective_achieved"] is not None:
+            raise PublishError("A newly created native Goal cannot claim a previous Goal outcome.")
+    elif native_goal_operation == "REPLACED":
+        if payload["replacement_history_verified"] is not True:
+            raise PublishError("Black-box run did not verify durable Goal replacement history.")
+        if payload["previous_goal_objective_achieved"] is not False:
+            raise PublishError("Black-box run falsely marked the superseded Goal as achieved.")
+    else:
+        raise PublishError("Black-box native Goal operation must be CREATED or REPLACED.")
     if not isinstance(payload["online_research_call_count"], int) or payload["online_research_call_count"] < 1:
         raise PublishError("Black-box run has no real online reuse research evidence.")
     if payload["product_validation_passed"] is not True or payload["product_validation_returncode"] != 0:
@@ -255,8 +262,8 @@ def validate_blackbox_attestation(payload: dict[str, Any], *, head: str, version
         "project_path": str(payload["project_path"]),
         "objective_sha256": plugin_hash,
         "objective_chars": objective_chars,
-        "native_goal_operation": payload["native_goal_operation"],
-        "replacement_history_verified": True,
+        "native_goal_operation": native_goal_operation,
+        "replacement_history_verified": payload["replacement_history_verified"],
         "online_research_call_count": payload["online_research_call_count"],
         "product_validation_command": str(payload["product_validation_command"]),
         "completed_at": str(payload["completed_at"]),
@@ -314,9 +321,11 @@ def compile_source() -> None:
 
 
 def run_source_verification() -> list[dict[str, Any]]:
+    # Execute the complete suite once from source. The extracted archive uses
+    # discover mode below, so both supported entry points are release-gated
+    # without running the same complete suite four times.
     commands = [
         [sys.executable, "-m", "unittest", "-q", "verification.tests.test_goal_compass"],
-        [sys.executable, "-m", "unittest", "discover", "-s", "verification/tests", "-q"],
         [sys.executable, "assets/governor-harness/.agent/selftest/test_goal_compass.py"],
     ]
     results = []
@@ -362,7 +371,6 @@ def run_extracted_verification(full_archive: Path) -> list[dict[str, Any]]:
             bundle.extractall(root)
         plugin = root / "codex-goal-supervisor"
         commands = [
-            [sys.executable, "-m", "unittest", "-q", "verification.tests.test_goal_compass"],
             [sys.executable, "-m", "unittest", "discover", "-s", "verification/tests", "-q"],
             [sys.executable, "assets/governor-harness/.agent/selftest/test_goal_compass.py"],
         ]
