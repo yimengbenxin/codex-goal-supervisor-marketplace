@@ -71,6 +71,8 @@ class ReleaseEditionTests(unittest.TestCase):
                 extracted[edition] = plugin
                 manifest = json.loads((plugin / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
                 self.assertEqual(manifest["distributionEdition"], edition)
+                self.assertTrue((plugin / "scripts/agent_assembler.py").is_file())
+                self.assertTrue((plugin / "skills/agent-assembler/assets/recipes.v1.json").is_file())
                 subprocess.run(
                     [sys.executable, str(plugin / "assets/governor-harness/.agent/selftest/test_goal_compass.py")],
                     cwd=plugin,
@@ -90,6 +92,7 @@ class ReleaseEditionTests(unittest.TestCase):
                 self.assertFalse((plugin / "scripts/configure_feedback_client.py").exists())
                 self.assertFalse((plugin / "scripts/fetch_feedback.py").exists())
                 self.assertFalse((plugin / "scripts/publish_verified_release.py").exists())
+                self.assertFalse((plugin / "scripts/share_agent_assembly_experience.py").exists())
                 feedback = (plugin / "assets/governor-harness/.agent/goal_compass_runtime/feedback.py").read_text(encoding="utf-8")
                 compass = (plugin / "assets/governor-harness/.agent/goal_compass.py").read_text(encoding="utf-8")
                 installer = (plugin / "scripts/install_governor.py").read_text(encoding="utf-8")
@@ -105,6 +108,7 @@ class ReleaseEditionTests(unittest.TestCase):
             self.assertTrue((full / "server/feedback_receiver.py").is_file())
             self.assertTrue((full / "scripts/plugin_auto_update.py").is_file())
             self.assertTrue((full / "scripts/release_variants/feedback_local.py").is_file())
+            self.assertTrue((full / "scripts/share_agent_assembly_experience.py").is_file())
             self.assertFalse((offline / "scripts/release_variants").exists())
             self.assertFalse((update_only / "scripts/release_variants").exists())
 

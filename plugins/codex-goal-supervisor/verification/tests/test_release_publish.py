@@ -212,10 +212,10 @@ class ReleasePublishTests(unittest.TestCase):
             PUBLISHER.run_source_verification()
         source_commands = [call.args[0] for call in run.call_args_list]
         self.assertIn(
-            [sys.executable, "-m", "unittest", "-q", "verification.tests.test_goal_compass"],
+            [sys.executable, str(PUBLISHER.VERIFICATION_RUNNER), "--workers", "6"],
             source_commands,
         )
-        self.assertFalse(any("discover" in command for command in source_commands))
+        self.assertFalse(any("verification.tests.test_goal_compass" in command for command in source_commands))
 
         with tempfile.TemporaryDirectory() as temporary:
             archive = Path(temporary) / "full.zip"
@@ -225,10 +225,27 @@ class ReleasePublishTests(unittest.TestCase):
                 PUBLISHER.run_extracted_verification(archive)
         archive_commands = [call.args[0] for call in run.call_args_list]
         self.assertIn(
-            [sys.executable, "-m", "unittest", "discover", "-s", "verification/tests", "-q"],
+            [sys.executable, "scripts/run_verification.py", "--workers", "6"],
             archive_commands,
         )
-        self.assertFalse(any("verification.tests.test_goal_compass" in command for command in archive_commands))
+        self.assertFalse(any("discover" in command for command in archive_commands))
+
+    def test_parallel_verification_runner_covers_every_test_module(self) -> None:
+        expected = sorted(
+            f"verification.tests.{path.stem}"
+            for path in (PUBLISHER.PLUGIN_ROOT / "verification" / "tests").glob("test_*.py")
+            if path.name != "test_goal_compass.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "goal_supervisor_verification_runner",
+            PUBLISHER.VERIFICATION_RUNNER,
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        runner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = runner
+        spec.loader.exec_module(runner)
+        self.assertEqual(runner.verification_modules(), expected)
 
     def test_release_requires_blackbox_attestation_before_verification(self) -> None:
         with mock.patch.object(PUBLISHER, "BLACKBOX_ATTESTATION", Path("/definitely/missing")):

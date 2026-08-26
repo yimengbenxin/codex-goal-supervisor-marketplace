@@ -1,16 +1,16 @@
 {
   "name": "codex-goal-supervisor",
-  "version": "3.1.4+codex.20260825153953",
-  "description": "Low-noise execution convergence for ordinary Codex work and long-running Goals",
+  "version": "3.2.0+codex.20260826152106",
+  "description": "Low-noise execution convergence and optional reproducible Agent assembly for Codex",
   "author": {
-    "name": "Codex Goal Supervisor contributors"
+    "name": "Codex Supervisor contributors"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Codex Goal Supervisor",
-    "shortDescription": "Keep long Codex loops aligned, verifiable, and convergent.",
-    "longDescription": "Codex Goal Supervisor is a low-noise execution-convergence tool with one capability core and inherited runtime profiles. The General Profile keeps ordinary Codex work unblocked while exposing observer, evidence, context, procedure, specialist, validation, and recovery capabilities on demand. The Goal Profile inherits that baseline and strengthens durable North Star, detailed Goal, return-path, route, deviation, phase, and final-certification behavior without duplicating implementations or forcing tickets, receipts, and governance ceremony onto ordinary work.",
-    "developerName": "Codex Goal Supervisor contributors",
+    "displayName": "Codex Supervisor",
+    "shortDescription": "Keep Codex execution aligned, verifiable, reusable, and convergent.",
+    "longDescription": "Codex Supervisor is a low-noise execution-convergence tool with one capability core and inherited runtime profiles. The General Profile keeps ordinary Codex work unblocked while exposing observer, evidence, context, procedure, specialist, validation, recovery, and reproducible Agent assembly capabilities on demand. The Goal Profile inherits that baseline and strengthens durable North Star, detailed Goal, return-path, route, deviation, phase, and final-certification behavior without duplicating implementations or forcing tickets, receipts, and governance ceremony onto ordinary work.",
+    "developerName": "Codex Supervisor contributors",
     "category": "Productivity",
     "capabilities": [
       "Background advisory observation",
@@ -36,9 +36,10 @@
       "Verified project-local procedure Skills and idempotent service runners",
       "Evidence-bearing cross-thread collaboration liveness",
       "Hierarchical parent-child Goal workstreams for independent Codex tasks",
+      "Optional reproducible Agent assembly with isolated community capability staging",
       "Versioned Git marketplace auto-update for new Codex sessions"
     ],
-    "defaultPrompt": "Use Codex Goal Supervisor only where it creates net execution benefit; keep ordinary work unblocked."
+    "defaultPrompt": "Use Codex Supervisor only where it creates net execution benefit; keep ordinary work unblocked."
   },
   "distributionEdition": "full",
   "networkFeatures": {

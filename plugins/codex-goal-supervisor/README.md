@@ -1,6 +1,6 @@
-# Codex Goal Supervisor
+# Codex Supervisor
 
-Codex Goal Supervisor is an execution-convergence tool for ordinary Codex work and long-running Goals. It provides one capability core through two inherited runtime Profiles: General keeps ordinary work quiet and unblocked; Goal strengthens durable direction, long-run recovery, and final certification without creating a second implementation.
+Codex Supervisor is an execution-convergence tool for ordinary Codex work and long-running Goals. It provides one capability core through two inherited runtime Profiles: General keeps ordinary work quiet and unblocked; Goal strengthens durable direction, long-run recovery, and final certification without creating a second implementation.
 
 ## Why We Built This
 
@@ -38,7 +38,7 @@ The project therefore starts from three principles:
 
 > Let an Agent work longer without becoming less aligned, move faster without hiding unfinished work, and recover from deviation without throwing away useful progress.
 
-Codex Goal Supervisor is designed as a **rational, low-noise administrator**, not a project decision maker. The execution Agent and the user retain judgment. The Supervisor preserves intent, observes evidence, detects expensive failure patterns, and applies the smallest useful intervention.
+Codex Supervisor is designed as a **rational, low-noise administrator**, not a project decision maker. The execution Agent and the user retain judgment. The Supervisor preserves intent, observes evidence, detects expensive failure patterns, and applies the smallest useful intervention.
 
 Its long-term ambition is to make autonomous Agents dependable enough to carry meaningful projects from intent to verified delivery: persistent enough to finish, self-correcting enough to recover, and quiet enough that coordination never becomes the product.
 
@@ -48,7 +48,7 @@ Its supreme rule is:
 
 ## What It Solves
 
-| Long-run failure | Codex Goal Supervisor response | Intended result |
+| Long-run failure | Codex Supervisor response | Intended result |
 | --- | --- | --- |
 | The project gradually forgets why it exists | Preserve a concise, project-owned North Star | Durable direction across long execution |
 | A large objective is too vague to execute | Maintain a separate detailed Goal-mode contract with modules, dependencies, outputs, and acceptance | Concrete work without confusing the North Star with the plan |
@@ -111,7 +111,7 @@ The implementation adapts eight Codex hook lifecycle events, the Codex plugin sk
 
 ## Product Boundary
 
-Codex Goal Supervisor deliberately does **not** become the project itself:
+Codex Supervisor deliberately does **not** become the project itself:
 
 - It does not auto-enroll unrelated repositories. Project use is explicit opt-in.
 - It does not silently rewrite a confirmed North Star or replace user judgment.
@@ -151,7 +151,7 @@ or its final judgment.
 
 ## Current Operating Model
 
-Codex Goal Supervisor has one public plugin identity. Release numbers describe internal compatibility only; upgrades replace older installed runtime files in place while preserving project-owned state.
+Codex Supervisor has one public plugin identity. The package slug remains `codex-goal-supervisor` for update compatibility. Release numbers describe internal compatibility only; upgrades replace older installed runtime files in place while preserving project-owned state.
 
 The plugin has one capability core and two runtime Profiles:
 
@@ -219,8 +219,40 @@ The convergence controller uses both layers. Explicit North Star anti-goals and 
 - **Bounded tickets:** optional contracts when isolation, machine acceptance, or parallel ownership creates net benefit.
 - **Convergence:** optional `convergence` status and iteration records separate activity from evidence-backed progress and retain the latest recovery checkpoint.
 - **Collaboration liveness:** cross-thread praise and agreement never count as progress. Two evidence-free handoffs produce `CONSENSUS_WITHOUT_PROGRESS` and end mutual review in favor of execution, validation, or one concrete escalation.
+- **Agent Assembler:** optional packaging of an already working business loop into a portable Agent. It selects community capabilities at assembly time, stages them outside product source, checks exact tested hashes, validates them against the real loop, locks revisions, and packages only declared paths. Codex Supervisor ships no third-party plugin warehouse. Capability experience is metadata-only and local by default; only the full edition's physically separate, consent-gated bridge can share it for maintainer reproduction.
 
 Normal product work is valid without an ACTIVE ticket.
+
+### Agent Assembler
+
+Agent Assembler is an optional tool for turning an already working project loop
+into a reproducible standalone Agent package. It does not generate a second
+framework around an unfinished demo and does not vendor a warehouse of community
+plugins into Codex Supervisor.
+
+```bash
+python3 <plugin-root>/scripts/agent_assembler.py inspect --project /path/to/project
+python3 <plugin-root>/scripts/agent_assembler.py init \
+  --project /path/to/project \
+  --name support-agent \
+  --goal "Package the verified support loop" \
+  --runtime standalone-python
+python3 <plugin-root>/scripts/agent_assembler.py validate --project /path/to/project
+python3 <plugin-root>/scripts/agent_assembler.py fetch \
+  --project /path/to/project \
+  --capability capability-id
+python3 <plugin-root>/scripts/agent_assembler.py verify --project /path/to/project
+python3 <plugin-root>/scripts/agent_assembler.py lock --project /path/to/project
+python3 <plugin-root>/scripts/agent_assembler.py package \
+  --project /path/to/project \
+  --output /path/to/agent.zip
+```
+
+Selected capabilities are staged in the project-local assembly cache, verified
+against machine acceptance, and locked by resolved revision and tree hash before
+packaging. Only blueprint-declared paths enter the archive. Source code and
+attachments are never included in shared experience records; experience remains
+local unless the user separately enables an edition-specific feedback bridge.
 
 ## Verification Before Completion
 
@@ -357,7 +389,7 @@ python3 .agent/goal_compass.py close
 
 The observer stores compact state in `.agent/runtime/observer_state.json`. It tracks counts and at most 100 candidate paths, not source contents. Lock-contended events use a bounded fallback queue and are folded into the next successful observation; the diagnostic event projection retains only the latest 128 events (up to 64 KiB). Current thresholds are intentionally sparse:
 
-For read-heavy turns, Codex Goal Supervisor also keeps a bounded metadata-only context ledger. A
+For read-heavy turns, Codex Supervisor also keeps a bounded metadata-only context ledger. A
 small read stays silent. Large historical-code or document reads are indexed in
 `.agent/runtime/context/index.json`, with file fingerprints split under
 `by-directory/<project-path>/_context.json`. Nothing is proactively injected
@@ -405,7 +437,7 @@ python3 -m unittest discover -s verification/tests -v
 python3 assets/governor-harness/.agent/selftest/test_goal_compass.py
 ```
 
-Codex Goal Supervisor is not a security sandbox, approval board, signature/HMAC ledger, reverse-signal workflow, or company governance simulator.
+Codex Supervisor is not a security sandbox, approval board, signature/HMAC ledger, reverse-signal workflow, or company governance simulator.
 
 ## Open Source
 

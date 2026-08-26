@@ -285,6 +285,7 @@ def strip_feedback_transport(plugin: Path) -> None:
         "scripts/configure_feedback_client.py",
         "scripts/fetch_feedback.py",
         "scripts/publish_verified_release.py",
+        "scripts/share_agent_assembly_experience.py",
         "verification/scenarios/run_feedback_matrix.py",
         "verification/tests/test_feedback_receiver.py",
         "verification/tests/test_release_publish.py",

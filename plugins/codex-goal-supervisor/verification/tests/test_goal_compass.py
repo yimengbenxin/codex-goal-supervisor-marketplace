@@ -40,6 +40,7 @@ TEST_MODULES = [
     "verification.tests.test_route_incidents",
     "verification.tests.test_capability_profiles",
     "verification.tests.test_agency_role_pack",
+    "verification.tests.test_agent_assembler",
     "verification.tests.test_cross_domain_benchmark",
     "verification.tests.test_long_run_industry_stress",
     "verification.tests.test_packaging_manufacturing_stress",

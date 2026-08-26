@@ -22,6 +22,7 @@ from typing import Any, Sequence
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
 BUILDER = PLUGIN_ROOT / "scripts" / "build_plugin_release.py"
+VERIFICATION_RUNNER = PLUGIN_ROOT / "scripts" / "run_verification.py"
 BLACKBOX_ATTESTATION = PLUGIN_ROOT / ".git" / "goal-supervisor-blackbox-attestation.json"
 CANONICAL_REPOSITORY = "yimengbenxin/codex-goal-supervisor"
 CANONICAL_REMOTE = "https://github.com/yimengbenxin/codex-goal-supervisor.git"
@@ -321,11 +322,11 @@ def compile_source() -> None:
 
 
 def run_source_verification() -> list[dict[str, Any]]:
-    # Execute the complete suite once from source. The extracted archive uses
-    # discover mode below, so both supported entry points are release-gated
-    # without running the same complete suite four times.
+    # Independent modules use isolated temporary repositories, so bounded
+    # parallel execution preserves coverage without making release validation
+    # pay the sum of every fixture's process-start cost.
     commands = [
-        [sys.executable, "-m", "unittest", "-q", "verification.tests.test_goal_compass"],
+        [sys.executable, str(VERIFICATION_RUNNER), "--workers", "6"],
         [sys.executable, "assets/governor-harness/.agent/selftest/test_goal_compass.py"],
     ]
     results = []
@@ -371,7 +372,7 @@ def run_extracted_verification(full_archive: Path) -> list[dict[str, Any]]:
             bundle.extractall(root)
         plugin = root / "codex-goal-supervisor"
         commands = [
-            [sys.executable, "-m", "unittest", "discover", "-s", "verification/tests", "-q"],
+            [sys.executable, "scripts/run_verification.py", "--workers", "6"],
             [sys.executable, "assets/governor-harness/.agent/selftest/test_goal_compass.py"],
         ]
         results = []

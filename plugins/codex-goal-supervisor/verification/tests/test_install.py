@@ -87,8 +87,9 @@ class InstallTests(MinimalPluginFixtureCase):
         plugin_root = Path(__file__).resolve().parents[2]
         manifest = json.loads((plugin_root / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "codex-goal-supervisor")
-        self.assertEqual(manifest["interface"]["displayName"], "Codex Goal Supervisor")
+        self.assertEqual(manifest["interface"]["displayName"], "Codex Supervisor")
         self.assertTrue(str(manifest["version"]).startswith("3."))
+        self.assertTrue((plugin_root / "README.md").read_text(encoding="utf-8").startswith("# Codex Supervisor\n"))
         for relative in ["README.md", "INSTALL_GOAL_COMPASS.zh.md", "skills/goal-supervisor/SKILL.md"]:
             text = (plugin_root / relative).read_text(encoding="utf-8")
             self.assertNotIn("Goal Supervisor V2", text)

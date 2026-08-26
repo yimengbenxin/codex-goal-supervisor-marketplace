@@ -1,11 +1,11 @@
 ---
 name: goal-supervisor
-description: Use when the user explicitly asks to install or use Codex Goal Supervisor, Goal Compass, North Star monitoring, optional bounded tickets, company subagents, Custodian, Auditor, or Janitor. The plugin is advisory-first and must not auto-install into unrelated projects.
+description: Use when the user explicitly asks to install or use Codex Supervisor (including the legacy Codex Goal Supervisor or Goal Compass names), North Star monitoring, optional bounded tickets, company subagents, Custodian, Auditor, or Janitor. The plugin is advisory-first and must not auto-install into unrelated projects.
 ---
 
-# Codex Goal Supervisor
+# Codex Supervisor
 
-Codex Goal Supervisor is a project tool, not a mandatory harness. Its supreme rule is:
+Codex Supervisor is a project tool, not a mandatory harness. Its supreme rule is:
 
 > Every action taken by the model and every supervisory intervention by this plugin must produce net execution benefit. Any action that may affect other modules without constraint or become noise for the entire project must be managed. If the cost of a control by this plugin exceeds the rework it can prevent, that control must remain inactive.
 
@@ -461,7 +461,7 @@ Use `goal-set --require-detailed` for this explicit operation. Never put only th
 python3 <plugin-root>/scripts/install_governor.py /path/to/repo --force
 ```
 
-The legacy-compatible script name installs Codex Goal Supervisor into `.agent/**` and `.codex/hooks.json` only. It must not overwrite root README, AGENTS, or project tests.
+The legacy-compatible script name installs Codex Supervisor into `.agent/**` and `.codex/hooks.json` only. It must not overwrite root README, AGENTS, or project tests.
 
 ## Low-Noise Output
 
